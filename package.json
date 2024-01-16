@@ -1,0 +1,19 @@
+{
+  "name": "migrate-to-w3up",
+  "version": "0.0.0",
+  "description": "Migrate data from old web3.storage to w3up",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Alan Shaw",
+  "license": "MIT",
+  "dependencies": {
+    "@ipld/unixfs": "^2.1.2",
+    "@web3-storage/pail": "^0.4.0",
+    "carstream": "^1.1.1",
+    "multiformats": "^13.0.1",
+    "web3.storage": "^4.5.5"
+  }
+}
