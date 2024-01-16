@@ -10,10 +10,16 @@
   "author": "Alan Shaw",
   "license": "MIT",
   "dependencies": {
+    "@ipld/dag-json": "^10.1.7",
     "@ipld/unixfs": "^2.1.2",
     "@web3-storage/pail": "^0.4.0",
     "carstream": "^1.1.1",
     "multiformats": "^13.0.1",
+    "multipart-stream": "^2.0.1",
+    "ndjson-readablestream": "^1.1.0",
     "web3.storage": "^4.5.5"
+  },
+  "bin": {
+    "migrate-from-w3-2023": "./migrate-from-w3-2023.js"
   }
 }
