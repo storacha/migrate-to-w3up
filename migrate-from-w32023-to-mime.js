@@ -13,6 +13,7 @@ import * as dagJson from 'multiformats/codecs/json'
 import { sha256 } from 'multiformats/hashes/sha2'
 const Multipart = await import('multipart-stream').then(m => m.default)
 import {Base64Encode} from 'base64-stream';
+import { fetchUploadParts } from './upload.js';
 
 const isMain = (url, argv=process.argv) => fileURLToPath(url) === fs.realpathSync(argv[1])
 if (isMain(import.meta.url, process.argv)) {
@@ -22,6 +23,8 @@ if (isMain(import.meta.url, process.argv)) {
 function getContentTypeFromCid(cid) {
   const parsed = CID.parse(cid)
   switch (parsed.code) {
+    case 0x0202:
+      return 'application/vnd.ipld.car'
     case 0x70:
       return 'application/vnd.ipld.dag-pb'
     default:
@@ -100,18 +103,6 @@ async function createMultipartRelatedReadable(ndjsonUploads, options={}) {
   const uploadsMultipart = new Multipart()
   /** @type {Promise<FetchedUploadPart[]>[]} */
   const queueToFetchUploadParts = []
-  const fetchUploadParts = async (upload) => {
-    const fetchedParts = await Promise.all(upload.parts.map(async cid => {
-      const url = new URL(`https://w3s.link/ipfs/${cid}`)
-      const response = await fetch(url);
-      return {
-        upload,
-        url,
-        response,
-      }
-    }))
-    return fetchedParts
-  }
   for await (const object of readNDJSONStream(ndjsonUploads)) {
     await options?.forEachUpload?.(object)
     const body = JSON.stringify(object, undefined, 2) + '\n'
@@ -132,12 +123,12 @@ async function createMultipartRelatedReadable(ndjsonUploads, options={}) {
   }
   while (queueToFetchUploadParts.length) {
     const fetchedUploads = await (queueToFetchUploadParts.pop())
-    for (const { upload, response, url } of fetchedUploads) {
+    for (const { upload, response, url, cid } of fetchedUploads) {
       console.warn({ upload, response, url })
       uploadsMultipart.addPart({
         headers: {
           'content-id': upload.cid,
-          'content-type': getContentTypeFromCid(upload.cid),
+          'content-type': getContentTypeFromCid(cid),
           'content-transfer-encoding': 'BASE64'
         },
         body: Readable.fromWeb(response.body).pipe(new Base64Encode),
