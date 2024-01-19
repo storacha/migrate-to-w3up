@@ -5,7 +5,8 @@ import * as Link from 'multiformats/link'
 import { CARWriterStream } from 'carstream/writer'
 
 const token = process.env.WEB3_STORAGE_TOKEN ?? ''
-const storage = new Web3Storage({ token })
+const endpoint = process.env.W3_URL ? new URL(process.env.W3_URL) : undefined
+const storage = new Web3Storage({ token, endpoint })
 
 const { readable, writable } = new TransformStream()
 const writer = UnixFS.createWriter({ writable })
