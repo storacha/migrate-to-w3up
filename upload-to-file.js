@@ -11,6 +11,7 @@ import * as stream from 'node:stream'
 import { CarReader } from '@ipld/car'
 import { CarIndexedReader } from '@ipld/car/indexed-reader'
 import path from "node:path"
+import readNDJSONStream from 'ndjson-readablestream';
 
 const isMain = (url, argv=process.argv) => fileURLToPath(url) === fs.realpathSync(argv[1])
 if (isMain(import.meta.url, process.argv)) {
@@ -24,36 +25,25 @@ async function main(argv) {
   const args = parseArgs({
     args: argv.slice(2),
     options: {
-      json: {
-        require: true,
+      from: {
         type: 'string',
-        help: 'json of upload'
+        default: '/dev/stdin',
+        help: 'where to get data from'
       },
     },
   })
-  const upload = JSON.parse(args.values.json)
-  const parts = await fetchUploadParts(upload)
-  if (parts.length !== 1) {
-    throw new Error(`expected 1 part but got ${parts.length}`)
+  for await (const upload of readNDJSONStream(stream.Readable.toWeb(fs.createReadStream(args.values.from)))) {
+    const parts = await fetchUploadParts(upload)
+    if (parts.length !== 1) {
+      throw new Error(`expected 1 part but got ${parts.length}`)
+    }
+    const part = parts[0]
+  
+    await fetchPartAndSaveToDisk(part)
   }
-  const part = parts[0]
-
-  await explorePart(part)
-
-  // console.log('exporting', upload.cid)
-  // const entries = exporter(upload.cid, {
-  //   async get (cid) {
-  //     console.log('exporter get', cid)
-  //     const fromW3s = await fetch('https://w3s.link/ipfs/'+cid)
-  //     return new Uint8Array(await (fromW3s).arrayBuffer())
-  //   }
-  // })
-  // for await (const entry of entries) {
-  //   console.log('entry', entry)
-  // }
 }
 
-async function explorePart(part) {
+async function fetchPartAndSaveToDisk(part) {
   const reader = await CarReader.fromIterable(part.response.body)
   const roots = await reader.getRoots()
   for (const root of roots) {
@@ -72,7 +62,7 @@ async function explorePart(part) {
         await stream.pipeline(contentReadable, entryFile, (err) => {
           // console.log('pipeline end', { err })
         })
-        console.warn('piped to', entry.path)
+        console.warn('wrote', entry.path)
       } else if (entry.type === 'directory') {
         fs.mkdirSync(entry.path, { recursive: true })
       }

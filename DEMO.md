@@ -5,13 +5,14 @@ upload='{"_id":"1","type":"Car","name":"Upload at 2024-01-19T04:40:04.490Z","cre
 
 `upload-to-files.js` will fetch the `parts` from the provided upload, decode them, and write to local fs
 ```shell
-⚡ node upload-to-file.js --json "$upload"
+⚡ echo "$upload" | node upload-to-file.js
 piped to bafybeihtddvvufnzdcetubq5mbv2rvgjchlipf6y7esei5qzg4r7re7rju/GOPR0787.JPG
 ```
 
+`migrate-from-w32023-to-mime` will convert a stream of uploads to a stream of MIME containing the uploads + blocks etc.
 
 ```shell
-⚡ (echo $upload; echo $upload) | migrate-from-w32023-to-mime --fetchParts > bengo.mime
+⚡ echo $upload | migrate-from-w32023-to-mime --fetchParts > bengo.mime
 wrote /dev/stdout
 
 ⚡ cat bengo.mime | head -n35
