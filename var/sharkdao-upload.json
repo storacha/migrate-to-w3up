@@ -1,0 +1,22 @@
+{
+  "_id": "1",
+  "type": "Car",
+  "name": "Upload at 2024-01-19T04:40:04.490Z",
+  "created": "2024-01-19T04:40:04.49+00:00",
+  "updated": "2024-01-19T04:40:04.49+00:00",
+  "cid": "bafybeihtddvvufnzdcetubq5mbv2rvgjchlipf6y7esei5qzg4r7re7rju",
+  "dagSize": 2949303,
+  "pins": [
+    {
+      "status": "Pinned",
+      "updated": "2024-01-19T04:40:04.49+00:00",
+      "peerId": "bafzbeibhqavlasjc7dvbiopygwncnrtvjd2xmryk5laib7zyjor6kf3avm",
+      "peerName": "elastic-ipfs",
+      "region": null
+    }
+  ],
+  "parts": [
+    "bagbaieraclriozt34fk5ej3aa7k67es2hyq5zyc3ohivgbee4qeyyeroqb4a"
+  ],
+  "deals": []
+}

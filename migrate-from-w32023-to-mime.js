@@ -124,7 +124,6 @@ async function createMultipartRelatedReadable(ndjsonUploads, options={}) {
   while (queueToFetchUploadParts.length) {
     const fetchedUploads = await (queueToFetchUploadParts.pop())
     for (const { upload, response, url, cid } of fetchedUploads) {
-      console.warn({ upload, response, url })
       uploadsMultipart.addPart({
         headers: {
           'content-id': upload.cid,
