@@ -14,6 +14,7 @@ import { sha256 } from 'multiformats/hashes/sha2'
 const Multipart = await import('multipart-stream').then(m => m.default)
 import {Base64Encode} from 'base64-stream';
 import { fetchUploadParts } from './upload.js';
+import { ReadableStream } from 'node:stream/web'
 
 const isMain = (url, argv=process.argv) => fileURLToPath(url) === fs.realpathSync(argv[1])
 if (isMain(import.meta.url, process.argv)) {
@@ -33,31 +34,30 @@ function getContentTypeFromCid(cid) {
 }
 
 async function main(argv) {
-  const options = {
-    from: {
-      type: 'string',
-      default: '/dev/stdin',
-      help: 'where to get data from'
-    },
-    fromMediaType: {
-      type: 'string',
-      default: 'application/vnd.web3.storage.car+ndjson;version=2023.old.web3.storage',
-      help: 'what kind of data to expect when sourced from options.from'
-    },
-    to: {
-      type: 'string',
-      help: 'where to write',
-      default: '/dev/stdout',
-    },
-    fetchParts: {
-      type: 'boolean',
-      default: false,
-      help: 'whether to fetch parts for each upload and include those in the multipart output',
-    }
-  }
   const args = parseArgs({
     args: argv.slice(2),
-    options,
+    options: {
+      from: {
+        type: 'string',
+        default: '/dev/stdin',
+        help: 'where to get data from'
+      },
+      fromMediaType: {
+        type: 'string',
+        default: 'application/vnd.web3.storage.car+ndjson;version=2023.old.web3.storage',
+        help: 'what kind of data to expect when sourced from options.from'
+      },
+      to: {
+        type: 'string',
+        help: 'where to write',
+        default: '/dev/stdout',
+      },
+      fetchParts: {
+        type: 'boolean',
+        default: false,
+        help: 'whether to fetch parts for each upload and include those in the multipart output',
+      }
+    },
   })
   const toMediaType = args.values.fromMediaType.replace(/\+ndjson$/, '+json')
   let encoded
@@ -101,7 +101,6 @@ async function main(argv) {
 async function createMultipartRelatedReadable(ndjsonUploads, options={}) {
   const { type = 'Multipart/Mixed' } = options
   const uploadsMultipart = new Multipart()
-  /** @type {Promise<FetchedUploadPart[]>[]} */
   const queueToFetchUploadParts = []
   for await (const object of readNDJSONStream(ndjsonUploads)) {
     await options?.forEachUpload?.(object)
