@@ -4,7 +4,7 @@ import * as Link from 'multiformats/link'
 /**
  * @param {W32023Upload} upload
  */
-function * toStoreAdd(upload) {
+export function * toStoreAdd(upload) {
   for (const part of upload.parts) {
     /** @type {import("@web3-storage/w3up-client/types").StoreAdd['nb']} */
     const add = {
