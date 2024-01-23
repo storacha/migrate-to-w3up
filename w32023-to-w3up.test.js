@@ -1,5 +1,15 @@
 import { describe, test } from 'node:test'
 import { W32023Upload } from './w32023.js'
+import fromW32023ToW3up from './w32023-to-w3up.js'
+import assert from 'assert'
+import * as Link from 'multiformats/link'
+import * as nodeHttp from 'node:http'
+import * as CAR from "@ucanto/transport/car"
+import * as HTTP from "@ucanto/transport/http"
+import * as Client from '@ucanto/client'
+import * as ed25519 from '@ucanto/principal/ed25519'
+import * as Server from "@ucanto/server"
+import { Store } from '@web3-storage/capabilities'
 
 /** example uploads from `w3 list --json` */
 const uploadsNdjson = `\
@@ -9,5 +19,48 @@ const uploadsNdjson = `\
 
 test('can convert one upload to a store/add', async () => {
   const upload = W32023Upload.from(uploadsNdjson.split('\n')[0])
-  console.log('upload', { upload })
+  const adds = [...fromW32023ToW3up.toStoreAdd(upload)]
+  assert.deepEqual(adds, [
+    {
+      size: 8848144,
+      link: Link.parse("bagbaierakuersmo7wndedhwk43e5xwcpzwenuda3dhpcsvkfibewg5gxl7oa"),
+    }
+  ])
+})
+
+test('can invoke store/add against mock server', async () => {
+  let serverAddsReceived = []
+  const server = Server.create({
+    id: await ed25519.generate(),
+    service: {
+      store: {
+        add(invocation, ctx) {
+          serverAddsReceived.push(invocation)
+          return {
+            ok: {}
+          }
+        }
+      }
+    },
+    codec: CAR.inbound,
+    validateAuthorization: () => ({ ok: {} }),
+  })
+  const space = await ed25519.generate()
+  const issuer = await ed25519.generate()
+  const connection = Client.connect({
+    id: issuer,
+    codec: CAR.outbound,
+    channel: server,
+  })
+  const upload = W32023Upload.from(uploadsNdjson.split('\n')[0])
+  for (const add of fromW32023ToW3up.toStoreAdd(upload)) {
+    const receipt = await Store.add.invoke({
+      issuer,
+      audience: server.id,
+      with: space.did(),
+      nb: add,
+    }).execute(connection)
+    assert.deepEqual(receipt.out.ok, {})
+  }
+  assert.equal(serverAddsReceived.length, 1)
 })

@@ -51,7 +51,6 @@ export class W32023Upload {
    * @param {W32023Upload} upload 
    */
   constructor(upload) {
-    console.log('constructing', upload, upload.pins)
     this.#upload = upload
     Object.assign(this, upload)
   }
