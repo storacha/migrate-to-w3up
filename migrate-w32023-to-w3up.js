@@ -41,15 +41,18 @@ async function main(argv) {
   const uploads = new W32023UploadsFromNdjson(input)
   for await (const upload of uploads) {
     for await (const add of toStoreAdd(upload)) {
-      const receipt = await access.invokeAndExecute(Store.add, {
+      const storeAdd = {
         with: space,
         nb: add,
-      })
+      }
+      const receipt = await access.invokeAndExecute(Store.add, storeAdd)
       if (receipt.out.ok) {
-        console.warn(inspect({
+        console.warn('successfully invoked store/add with link=', add.link)
+        console.log(inspect({
           type: 'Add',
           object: add.link.toString(),
           upload: upload,
+          invocation: storeAdd,
           receipt: {
             cid: receipt.root.cid.toString(),
             out: receipt.out,
@@ -64,6 +67,49 @@ async function main(argv) {
             receipt,
           },
         )
+      }
+      // we know receipt indicated successful store/add.
+      // now let's upload the car bytes if the response hints we should
+      // @ts-expect-error ok type is {} but 'status' should be there or its ok if not
+      switch (receipt.out.ok.status) {
+        case "done":
+          console.debug(`store/add ok indicates car ${add.part} was already in w3up`)
+          break;
+        case "upload": {
+          const carResponse = await fetch(add.partUrl)
+          // fetch car bytes
+          /** @type {any} */
+          const storeAddSuccess = receipt.out.ok
+  
+          if (carResponse.status !== 200) {
+            throw Object.assign(
+              new Error(`unexpected non-200 response status code when fetching car from w3s.link`),
+              { part: add.part, url: add.partUrl, response: carResponse },
+            )
+          }
+          // carResponse has status 200
+          if (carResponse.headers.has('content-length')) {
+            console.warn(`car ${add.part} has content-length`, carResponse.headers.get('content-length'))
+          }
+          console.warn('will send to presigned url', storeAddSuccess.url)
+          const sendToPresignedResponse = await fetch(
+            new Request(
+              storeAddSuccess.url,
+              {
+                method: 'PUT',
+                mode: 'cors',
+                headers: storeAddSuccess.headers,
+                body: carResponse.body,
+                // @ts-ignore
+                duplex: 'half' 
+              }
+            )
+          )
+          console.log('sendToPresignedResponse', sendToPresignedResponse)
+          break;
+        }
+        default:
+          console.warn('unexpected store/add ok.status', receipt.out.ok)
       }
     }
   }
