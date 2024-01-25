@@ -25,8 +25,8 @@ await test('can convert one upload to a store/add', async () => {
   const adds = []
   for await (const a of fromW32023ToW3up.toStoreAdd(upload)) { adds.push(a) }
   assert.equal(adds.length, 1)
-  assert.equal(adds[0].size, 2949554)
-  assert.equal(adds[0].link.toString(), Link.parse("bagbaieraclriozt34fk5ej3aa7k67es2hyq5zyc3ohivgbee4qeyyeroqb4a").toString())
+  assert.equal(adds[0].nb.size, 2949554)
+  assert.equal(adds[0].nb.link.toString(), Link.parse("bagbaieraclriozt34fk5ej3aa7k67es2hyq5zyc3ohivgbee4qeyyeroqb4a").toString())
 })
 
 await test('can convert stream of json to stream of uploads', async () => {
@@ -75,7 +75,7 @@ await test('can invoke store/add against mock server', async () => {
       issuer,
       audience: server.id,
       with: space.did(),
-      nb: add,
+      nb: add.nb,
     }).execute(connection)
     assert.deepEqual(receipt.out.ok, {})
   }

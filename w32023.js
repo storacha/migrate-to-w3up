@@ -75,3 +75,21 @@ export class W32023Upload {
     Object.assign(this, upload)
   }
 }
+
+export class W32023UploadSummary {
+  /** @type {W32023Upload} */
+  #upload;
+  constructor(upload) {
+    this.#upload = upload
+  }
+  toJSON() {
+    return {
+      _id: this.#upload._id,
+      cid: this.#upload.cid,
+      name: this.#upload.name,
+      parts: this.#upload.parts,
+      created: this.#upload.created,
+      updated: this.#upload.updated,
+    }
+  }
+}

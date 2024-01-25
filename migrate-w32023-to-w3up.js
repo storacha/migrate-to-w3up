@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { W32023Upload, W32023UploadsFromNdjson } from "./w32023.js";
+import { W32023Upload, W32023UploadSummary, W32023UploadsFromNdjson } from "./w32023.js";
 import * as Link from 'multiformats/link'
 import { fileURLToPath } from 'url'
 import fs from 'fs'
@@ -43,39 +43,35 @@ async function main(argv) {
     for await (const add of toStoreAdd(upload)) {
       const storeAdd = {
         with: space,
-        nb: add,
+        nb: add.nb,
       }
       const receipt = await access.invokeAndExecute(Store.add, storeAdd)
       if (receipt.out.ok) {
-        console.warn('successfully invoked store/add with link=', add.link)
-        console.log(inspect({
-          type: 'Add',
-          object: add.link.toString(),
-          upload: upload,
-          invocation: storeAdd,
-          receipt: {
-            cid: receipt.root.cid.toString(),
-            out: receipt.out,
-          },
-        }, true, Infinity))
+        console.warn('successfully invoked store/add with link=', add.nb.link)
       } else {
+        console.warn('receipt.out', receipt.out)
         throw Object.assign(
           new Error(`failure invoking store/add`),
           {
             add,
             with: space,
-            receipt,
+            receipt: {
+              ...receipt,
+              out: receipt.out,
+            },
           },
         )
       }
+      let sentCarTo
       // we know receipt indicated successful store/add.
       // now let's upload the car bytes if the response hints we should
       // @ts-expect-error ok type is {} but 'status' should be there or its ok if not
       switch (receipt.out.ok.status) {
         case "done":
-          console.debug(`store/add ok indicates car ${add.part} was already in w3up`)
+          console.warn(`store/add ok indicates car ${add.part} was already in w3up`)
           break;
         case "upload": {
+          // we need to upload car bytes
           const carResponse = await fetch(add.partUrl)
           // fetch car bytes
           /** @type {any} */
@@ -91,26 +87,67 @@ async function main(argv) {
           if (carResponse.headers.has('content-length')) {
             console.warn(`car ${add.part} has content-length`, carResponse.headers.get('content-length'))
           }
-          console.warn('will send to presigned url', storeAddSuccess.url)
-          const sendToPresignedResponse = await fetch(
-            new Request(
-              storeAddSuccess.url,
-              {
-                method: 'PUT',
-                mode: 'cors',
-                headers: storeAddSuccess.headers,
-                body: carResponse.body,
-                // @ts-ignore
-                duplex: 'half' 
+          console.warn(`piping CAR bytes from ${add.partUrl} to url from store/add response "${storeAddSuccess.url}"`)
+          const sendCarRequest = new Request(
+            storeAddSuccess.url,
+            {
+              method: 'PUT',
+              mode: 'cors',
+              headers: storeAddSuccess.headers,
+              body: carResponse.body,
+              redirect: 'follow',
+              // @ts-ignore
+              duplex: 'half' 
+            }
+          )
+          const sendToPresignedResponse = await fetch(sendCarRequest)
+          // ensure was 2xx, otherwise throw because something unusual happened
+          if ( ! (200 <= sendToPresignedResponse.status && sendToPresignedResponse.status < 300)) {
+            console.warn('unsuccessful sendToPresignedResponse', sendToPresignedResponse)
+            throw Object.assign(
+              new Error(`error sending car bytes to url from store/add response`), {
+                response: sendToPresignedResponse,
               }
             )
-          )
-          console.log('sendToPresignedResponse', sendToPresignedResponse)
+          }
+          sentCarTo = {
+            request: sendCarRequest,
+            response: sendToPresignedResponse,
+          }
           break;
         }
         default:
           console.warn('unexpected store/add ok.status', receipt.out.ok)
+          // @ts-ignore
+          throw new Error(`unexpected store/add ok.status: ${receipt.out.ok.status}`)
+          // next part
+          continue
       }
+      // it's been added to the space. log that
+      console.log(JSON.stringify({
+        type: 'Add',
+        attributedTo: access.issuer.did(),
+        source: new W32023UploadSummary(upload),
+        object: add.nb.link.toString(),
+        target: space,
+        invocation: storeAdd,
+        receipt: {
+          cid: receipt.root.cid.toString(),
+          out: receipt.out,
+        },
+        ...(sentCarTo && {
+          sentCarTo: {
+            request: {
+              url: sentCarTo.request.url.toString(),
+              method: sentCarTo.request.method.toString(),
+              headers: sentCarTo.request.headers,
+            },
+            response: {
+              status: sentCarTo.response.status,
+            }
+          }
+        })
+      }, undefined, 2))
     }
   }
 }
