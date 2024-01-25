@@ -7,7 +7,7 @@ import { Readable } from 'node:stream'
 import { toStoreAdd } from "./w32023-to-w3up.js";
 import * as w3up from "@web3-storage/w3up-client"
 import { parseArgs } from 'node:util'
-import { Store } from '@web3-storage/capabilities'
+import { Store, Upload } from '@web3-storage/capabilities'
 import {DID} from "@ucanto/validator"
 import { StoreConf } from '@web3-storage/access/stores/store-conf'
 import { inspect } from 'util'
@@ -62,7 +62,7 @@ async function main(argv) {
           },
         )
       }
-      let sentCarTo
+      let copiedCarTo
       // we know receipt indicated successful store/add.
       // now let's upload the car bytes if the response hints we should
       // @ts-expect-error ok type is {} but 'status' should be there or its ok if not
@@ -110,7 +110,7 @@ async function main(argv) {
               }
             )
           }
-          sentCarTo = {
+          copiedCarTo = {
             request: sendCarRequest,
             response: sendToPresignedResponse,
           }
@@ -128,26 +128,69 @@ async function main(argv) {
         type: 'Add',
         attributedTo: access.issuer.did(),
         source: new W32023UploadSummary(upload),
-        object: add.nb.link.toString(),
-        target: space,
+        object: {
+          type: 'car',
+          cid: add.nb.link.toString(),
+          size: add.nb.size.toString(),
+          ...(copiedCarTo && {
+            copy: {
+              request: {
+                url: copiedCarTo.request.url.toString(),
+                method: copiedCarTo.request.method.toString(),
+                headers: copiedCarTo.request.headers,
+              },
+              response: {
+                status: copiedCarTo.response.status,
+              }
+            }
+          })
+        },
+        target: {
+          type: 'Space',
+          id: space,
+        },
         invocation: storeAdd,
         receipt: {
           cid: receipt.root.cid.toString(),
           out: receipt.out,
         },
-        ...(sentCarTo && {
-          sentCarTo: {
-            request: {
-              url: sentCarTo.request.url.toString(),
-              method: sentCarTo.request.method.toString(),
-              headers: sentCarTo.request.headers,
-            },
-            response: {
-              status: sentCarTo.response.status,
-            }
-          }
-        })
       }, undefined, 2))
     }
+    // store/add is done for upload
+    // need to do an upload/add
+    const shards = upload.parts.map(c => Link.parse(c))
+    const root = Link.parse(upload.cid)
+    const uploadAddReceipt = await access.invokeAndExecute(Upload.add, {
+      with: space,
+      nb: {
+        root,
+        // @ts-expect-error: Link.parse is generic link but shards wants CAR links type
+        shards,
+      }
+    })
+    if ( ! uploadAddReceipt.out.ok) {
+      throw Object.assign(new Error(`failure result from upload/add invocation`), {
+        result: uploadAddReceipt,
+        out: uploadAddReceipt.out,
+      })
+    }
+    console.log(JSON.stringify({
+      type: 'Add',
+      attributedTo: access.issuer.did(),
+      source: new W32023UploadSummary(upload),
+      object: {
+        type: 'Upload',
+        root,
+        shards,
+      },
+      target: {
+        type: 'Space',
+        id: space,
+      },
+      receipt: {
+        cid: uploadAddReceipt.root.cid.toString(),
+        out: uploadAddReceipt.out,
+      },
+    }, undefined, 2))
   }
 }
