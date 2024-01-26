@@ -261,12 +261,14 @@ async function main(argv) {
   const agent = await getDefaultW3upAgent()
   // source of uploads is stdin by default
   let source
+  let isInteractive
   // except stdin won't work if nothing is piped in.
   // If nothing piped in, ask the user what to do.
   if ( ! process.stdin.isTTY) {
     source = new W32023UploadsFromNdjson(Readable.toWeb(process.stdin))
   } else {
     source = await getUploadsFromPrompts()
+    isInteractive = true
   }
   const migration = migrate({
     issuer: agent.issuer,
@@ -285,7 +287,7 @@ async function main(argv) {
     ])
   })
   for await (const event of migration) {
-    console.log(JSON.stringify(event))
+    console.log(JSON.stringify(event, undefined, isInteractive ? 2 : undefined))
   }
 }
 
