@@ -10,9 +10,6 @@ import { parseArgs } from 'node:util'
 import { Store, Upload } from '@web3-storage/capabilities'
 import {DID} from "@ucanto/validator"
 import { StoreConf } from '@web3-storage/access/stores/store-conf'
-import { inspect } from 'util'
-import { Agent } from "@web3-storage/access";
-import { connection as createConnection } from "@web3-storage/access/agent";
 
 /**
  * @typedef {import('@ucanto/interface').Delegation[]} Authorization
@@ -39,89 +36,15 @@ import { connection as createConnection } from "@web3-storage/access/agent";
  * @param {URL} options.destination - e.g. a space DID
  * @param {AbortSignal} [options.signal]
  */
-export function migrate(options) {
-  return new Migration(options)
-}
-
-async function getDefaultW3upAgent() {
-  // @todo - we shouldn't need to reuse this store, though it's conventient for w3cli users.
-  // instead, accept accept W3_PRINCIPAL and W3_PROOF env vars or flags 
-  const store = new StoreConf({ profile: process.env.W3_STORE_NAME ?? 'w3cli' })
-  const w3 = await w3up.create({ store })
-  // @ts-expect-error _agent is protected property
-  const access = w3._agent
-  return access
-}
-
-class Migration {
-  /**
-   * @type {Array<MigrationEvent>}
-   */
-  #events
-  /**
-   * @type {'INIT'|'RUNNING'|'RAN'}
-   */
-  #state
-  /**
-   * @type {AsyncIterator}
-   */
-  #running
-  #error;
-  #start
-  /** @type {Promise<void>} */
-  ran;
-  /**
-   * @param {object} options 
-   * @param {Authorization} [options.authorization]
-   * @param {import("@ucanto/client").ConnectionView} options.w3up
-   * @param {import("@ucanto/client").SignerKey} options.issuer
-   * @param {AsyncIterable<W32023Upload>} options.source
-   * @param {URL} options.destination - e.g. a space DID
-   * @param {Promise<Agent>} [options.agent] - e.g. a space DID
-   * @param {AbortSignal} [options.signal]
-   */
-  constructor(options) {
-    const agent = options.agent || getDefaultW3upAgent()
-    this.#state = 'INIT'
-    this.#events = []
-    this.#error
-    this.#start = async () => {
-      options.signal?.throwIfAborted()
-      this.#state = 'RUNNING'
-      try {
-        for await (const event of this.#run({
-          agent,
-          ...options,
-        })) {
-          options.signal?.throwIfAborted()
-          this.#events.push(event)
-        }
-      } catch (error) {
-        this.#error = error
-        throw error
-      } finally {
-        this.#state = 'RAN'
-      }
-    }
-  }
-  /**
-   * @param {object} options 
-   * @param {import("@ucanto/client").SignerKey} options.issuer
-   * @param {Authorization} [options.authorization]
-   * @param {AsyncIterable<W32023Upload>} options.source
-   * @param {import("@ucanto/client").ConnectionView} options.w3up
-   * @param {URL} options.destination - e.g. a space DID
-   * @param {AbortSignal} [options.signal]
-   */
-  async * #run({
-    issuer,
-    authorization,
-    source,
-    destination,
-    w3up,
-    signal,
-  }) {
-    signal?.throwIfAborted()
+export async function * migrate({
+  issuer,
+  authorization,
+  w3up,
+  source,
+  destination,
+  signal,
+}) {
+  signal?.throwIfAborted()
     const space = DID.match({ method: 'key' }).from(destination.toString())
     for await (const upload of source) {
       signal?.throwIfAborted()
@@ -292,35 +215,21 @@ class Migration {
         },
       }
     }
-  }
-  /**
-   * @returns {AsyncIterator<MigrationEvent, void, undefined>}
-   */
-  async *[Symbol.asyncIterator]() {
-    if ( ! this.ran) {
-      this.ran = this.#start()
-    }
-    let yieldedSoFar = 0
-    for await (const event of this.#events) {
-      yield event
-      yieldedSoFar++
-    }
-    if (this.#state === 'RUNNING') {
-      await this.ran
-    } else if (this.#error) {
-      throw this.#error
-    }
-    if (this.#events.length > yieldedSoFar) {
-      for (let i=yieldedSoFar; i < this.#events.length; i++) {
-        yield this.#events[i]
-      }
-    }
-  }
 }
 
 const isMain = (url, argv=process.argv) => fileURLToPath(url) === fs.realpathSync(argv[1])
 if (isMain(import.meta.url, process.argv)) {
   main(process.argv).catch(error => console.error('error in main()', error))
+}
+
+async function getDefaultW3upAgent() {
+  // @todo - we shouldn't need to reuse this store, though it's conventient for w3cli users.
+  // instead, accept accept W3_PRINCIPAL and W3_PROOF env vars or flags 
+  const store = new StoreConf({ profile: process.env.W3_STORE_NAME ?? 'w3cli' })
+  const w3 = await w3up.create({ store })
+  // @ts-expect-error _agent is protected property
+  const access = w3._agent
+  return access
 }
 
 async function main(argv) {

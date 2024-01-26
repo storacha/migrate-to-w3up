@@ -104,12 +104,4 @@ await test('can invoke store/add against mock server', async () => {
   assert.equal(events.length, 2)
   assert.ok(events.find(e => e.object.type.toLowerCase() === 'upload'))
   assert.ok(events.find(e => e.object.type.toLowerCase() === 'car'))
-
-  // this should get same events,
-  // but not hit network again
-  const events2 = []
-  for await (const event of migration) {
-    events2.push(event)
-  }
-  assert.equal(events2.length, 2)
 })
