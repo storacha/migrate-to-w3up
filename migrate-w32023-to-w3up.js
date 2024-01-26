@@ -222,15 +222,25 @@ if (isMain(import.meta.url, process.argv)) {
   main(process.argv).catch(error => console.error('error in main()', error))
 }
 
-async function getDefaultW3upAgent() {
+async function getDefaultW3up() {
   // @todo - we shouldn't need to reuse this store, though it's conventient for w3cli users.
   // instead, accept accept W3_PRINCIPAL and W3_PROOF env vars or flags 
   const store = new StoreConf({ profile: process.env.W3_STORE_NAME ?? 'w3cli' })
   const w3 = await w3up.create({ store })
+  return w3
+}
+
+async function getDefaultW3upAgent() {
+  const w3 = await getDefaultW3up()
   // @ts-expect-error _agent is protected property
   const access = w3._agent
   return access
 }
+
+import confirm from '@inquirer/confirm';
+import { input } from '@inquirer/prompts';
+import {Web3Storage} from 'web3.storage'
+import promptForPassword from '@inquirer/password';
 
 async function main(argv) {
   const { values } = parseArgs({
@@ -241,13 +251,41 @@ async function main(argv) {
       }
     }
   })
-  if ( ! values.space) throw new Error(`provide --space <space.did>`)
-  const space = DID.match({ method: 'key' }).from(values.space)
+  let spaceValue = values.space
+  if ( ! spaceValue) {
+    const chosenSpace = await promptForSpace()
+    console.log('using space', chosenSpace.did())
+    spaceValue = chosenSpace.did()
+  }
+  const space = DID.match({ method: 'key' }).from(spaceValue)
   const agent = await getDefaultW3upAgent()
+  // source of uploads is stdin by default
+  let source
+  // except stdin won't work if nothing is piped in.
+  // If nothing piped in, ask the user what to do.
+  if ( ! process.stdin.isTTY) {
+    source = new W32023UploadsFromNdjson(Readable.toWeb(process.stdin))
+  } else {
+    const confirmation = await confirm({
+      message: 'no uploads were piped in. Do you want to migrate uploads from old.web3.storage?',
+    })
+    if ( ! confirmation) throw new Error('unable to find a source of uploads to migrate')
+    const envToken = process.env.WEB3_TOKEN
+    let token;
+    if (await confirm({ message: 'found WEB3_TOKEN in env. Use that?' })) {
+      token = envToken
+    } else {
+      token = await promptForPassword({
+        message: 'enter API token for old.web3.storage',
+      })
+    }
+    const oldW3 = new Web3Storage({ token })
+    source = oldW3.list()
+  }
   const migration = migrate({
     issuer: agent.issuer,
     w3up: agent.connection,
-    source: new W32023UploadsFromNdjson(Readable.toWeb(process.stdin)),
+    source,
     destination: new URL(space),
     authorization: agent.proofs([
       {
@@ -263,4 +301,23 @@ async function main(argv) {
   for await (const event of migration) {
     console.log(JSON.stringify(event))
   }
+}
+
+import { select } from '@inquirer/prompts';
+
+async function promptForSpace() {
+  const w3up = await getDefaultW3up()
+  
+  const selection = await select({
+    message: 'choose a space',
+    pageSize: 32,
+    choices: w3up.spaces().map(s => {
+      return {
+        name: [s.name, s.did()].filter(Boolean).join(' - '),
+        value: s,
+        description: JSON.stringify(s.meta)
+      }
+    })
+  })
+  return selection
 }

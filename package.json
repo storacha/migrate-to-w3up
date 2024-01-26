@@ -11,9 +11,12 @@
   "author": "Alan Shaw",
   "license": "MIT",
   "dependencies": {
+    "@inquirer/password": "^1.1.14",
+    "@inquirer/prompts": "^3.3.0",
     "@ipld/car": "^5.2.6",
     "@ipld/dag-pb": "^4.0.8",
     "@ipld/unixfs": "^2.1.2",
+    "@ucanto/validator": "^9.0.1",
     "@web3-storage/access": "^18.1.1",
     "@web3-storage/capabilities": "^13.0.0",
     "@web3-storage/pail": "^0.4.0",
@@ -22,8 +25,7 @@
     "ipfs-unixfs-exporter": "^13.4.0",
     "multiformats": "^13.0.1",
     "ndjson-readablestream": "^1.1.0",
-    "web3.storage": "^4.5.5",
-    "@ucanto/validator": "^9.0.1"
+    "web3.storage": "^4.5.5"
   },
   "bin": {
     "migrate-w32023-to-w3up": "./migrate-w32023-to-w3up.js"
