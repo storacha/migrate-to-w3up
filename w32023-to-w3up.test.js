@@ -12,6 +12,7 @@ import * as Server from "@ucanto/server"
 import { Store } from '@web3-storage/capabilities'
 import { Readable } from 'stream'
 import { ReadableStream } from 'stream/web'
+import { migrate } from './migrate-w32023-to-w3up.js'
 
 /** example uploads from `w3 list --json` */
 const uploadsNdjson = `\
@@ -46,13 +47,24 @@ await test('can convert stream of json to stream of uploads', async () => {
 })
 
 await test('can invoke store/add against mock server', async () => {
-  let serverAddsReceived = []
+  let storeAddInvocations = []
+  let uploadAddInvocations = []
   const server = Server.create({
     id: await ed25519.generate(),
     service: {
       store: {
         add(invocation, ctx) {
-          serverAddsReceived.push(invocation)
+          storeAddInvocations.push(invocation)
+          return {
+            ok: {
+              status: 'done',
+            }
+          }
+        }
+      },
+      upload: {
+        add(invocation, ctx) {
+          uploadAddInvocations.push(invocation)
           return {
             ok: {}
           }
@@ -62,22 +74,42 @@ await test('can invoke store/add against mock server', async () => {
     codec: CAR.inbound,
     validateAuthorization: () => ({ ok: {} }),
   })
+
   const space = await ed25519.generate()
-  const issuer = await ed25519.generate()
+  const issuer = space
   const connection = Client.connect({
     id: issuer,
     codec: CAR.outbound,
     channel: server,
   })
-  const upload = W32023Upload.from(uploadsNdjson.split('\n')[0])
-  for await (const add of fromW32023ToW3up.toStoreAdd(upload)) {
-    const receipt = await Store.add.invoke({
-      issuer,
-      audience: server.id,
-      with: space.did(),
-      nb: add.nb,
-    }).execute(connection)
-    assert.deepEqual(receipt.out.ok, {})
+  const uploads = new W32023UploadsFromNdjson(new ReadableStream({
+    start(c) {
+      c.enqueue(new TextEncoder().encode(uploadsNdjson))
+      c.close()
+    }
+  }))
+  const aborter = new AbortController
+  const migration = migrate({
+    issuer,
+    w3up: connection,
+    authorization: [],
+    source: uploads,
+    destination: new URL(space.did()),
+    signal: aborter.signal,
+  })
+  const events = []
+  for await (const event of migration) {
+    events.push(event)
   }
-  assert.equal(serverAddsReceived.length, 1)
+  assert.equal(events.length, 2)
+  assert.ok(events.find(e => e.object.type.toLowerCase() === 'upload'))
+  assert.ok(events.find(e => e.object.type.toLowerCase() === 'car'))
+
+  // this should get same events,
+  // but not hit network again
+  const events2 = []
+  for await (const event of migration) {
+    events2.push(event)
+  }
+  assert.equal(events2.length, 2)
 })
