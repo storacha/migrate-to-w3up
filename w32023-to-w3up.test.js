@@ -46,7 +46,7 @@ await test('can convert stream of json to stream of uploads', async () => {
   assert.equal(uploadCount, 1)
 })
 
-await test('can invoke store/add against mock server', async () => {
+await test('can run migration to mock server', async () => {
   let storeAddInvocations = []
   let uploadAddInvocations = []
   const server = Server.create({
