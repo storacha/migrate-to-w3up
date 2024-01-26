@@ -266,21 +266,7 @@ async function main(argv) {
   if ( ! process.stdin.isTTY) {
     source = new W32023UploadsFromNdjson(Readable.toWeb(process.stdin))
   } else {
-    const confirmation = await confirm({
-      message: 'no uploads were piped in. Do you want to migrate uploads from old.web3.storage?',
-    })
-    if ( ! confirmation) throw new Error('unable to find a source of uploads to migrate')
-    const envToken = process.env.WEB3_TOKEN
-    let token;
-    if (await confirm({ message: 'found WEB3_TOKEN in env. Use that?' })) {
-      token = envToken
-    } else {
-      token = await promptForPassword({
-        message: 'enter API token for old.web3.storage',
-      })
-    }
-    const oldW3 = new Web3Storage({ token })
-    source = oldW3.list()
+    source = await getUploadsFromPrompts()
   }
   const migration = migrate({
     issuer: agent.issuer,
@@ -320,4 +306,22 @@ async function promptForSpace() {
     })
   })
   return selection
+}
+
+async function getUploadsFromPrompts() {
+  const confirmation = await confirm({
+    message: 'no uploads were piped in. Do you want to migrate uploads from old.web3.storage?',
+  })
+  if ( ! confirmation) throw new Error('unable to find a source of uploads to migrate')
+  const envToken = process.env.WEB3_TOKEN
+  let token;
+  if (await confirm({ message: 'found WEB3_TOKEN in env. Use that?' })) {
+    token = envToken
+  } else {
+    token = await promptForPassword({
+      message: 'enter API token for old.web3.storage',
+    })
+  }
+  const oldW3 = new Web3Storage({ token })
+  return oldW3.list()
 }
