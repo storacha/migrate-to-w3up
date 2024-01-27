@@ -5,12 +5,9 @@ import { fileURLToPath } from 'url'
 import { parseArgs } from 'util'
 import { fetchUploadParts } from './upload.js'
 import { recursive as exporter } from 'ipfs-unixfs-exporter'
-import consumers from 'stream/consumers'
-import * as pb from '@ipld/dag-pb'
+// import * as pb from '@ipld/dag-pb'
 import * as stream from 'node:stream'
 import { CarReader } from '@ipld/car'
-import { CarIndexedReader } from '@ipld/car/indexed-reader'
-import path from "node:path"
 import readNDJSONStream from 'ndjson-readablestream';
 
 const isMain = (url, argv=process.argv) => fileURLToPath(url) === fs.realpathSync(argv[1])
@@ -47,8 +44,8 @@ async function fetchPartAndSaveToDisk(part) {
   const reader = await CarReader.fromIterable(part.response.body)
   const roots = await reader.getRoots()
   for (const root of roots) {
-    const readRoot = await reader.get(root)
-    const decoded = pb.decode(readRoot.bytes)
+    // const readRoot = await reader.get(root)
+    // const decoded = pb.decode(readRoot.bytes)
     const entries = exporter(root, {
       async get (cid) {
         const block = await reader.get(cid)

@@ -1,16 +1,12 @@
-import { describe, test } from 'node:test'
+import { test } from 'node:test'
 import { W32023Upload, W32023UploadsFromNdjson } from './w32023.js'
 import fromW32023ToW3up from './w32023-to-w3up.js'
 import assert from 'assert'
 import * as Link from 'multiformats/link'
-import * as nodeHttp from 'node:http'
 import * as CAR from "@ucanto/transport/car"
-import * as HTTP from "@ucanto/transport/http"
 import * as Client from '@ucanto/client'
 import * as ed25519 from '@ucanto/principal/ed25519'
 import * as Server from "@ucanto/server"
-import { Store } from '@web3-storage/capabilities'
-import { Readable } from 'stream'
 import { ReadableStream } from 'stream/web'
 import { migrate } from './migrate-w32023-to-w3up.js'
 

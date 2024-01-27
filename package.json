@@ -6,10 +6,36 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "tsc": "tsc --build"
+    "tsc": "tsc --build",
+    "lint": "npx eslint *.js"
   },
   "author": "Alan Shaw",
   "license": "MIT",
+  "eslintConfig": {
+    "extends": [
+      "eslint:recommended",
+      "plugin:@typescript-eslint/recommended"
+    ],
+    "plugins": [
+      "jsdoc",
+      "@typescript-eslint"
+    ],
+    "rules": {
+      "jsdoc/no-undefined-types": 1,
+      "@typescript-eslint/no-unused-vars": ["warn", { "args": "none"}]
+    },
+    "env": {
+      "node": true
+    },
+    "parser": "@typescript-eslint/parser",
+    "parserOptions": {
+      "project": [
+        "./tsconfig.json"
+      ],
+      "ecmaVersion": 14,
+      "sourceType": "module"
+    }
+  },
   "dependencies": {
     "@inquirer/password": "^1.1.14",
     "@inquirer/prompts": "^3.3.0",
@@ -31,10 +57,12 @@
     "migrate-w32023-to-w3up": "./migrate-w32023-to-w3up.js"
   },
   "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^6.19.1",
     "@ucanto/client": "^9.0.0",
     "@ucanto/principal": "^9.0.0",
     "@ucanto/server": "^9.0.1",
     "@ucanto/transport": "^9.0.2",
+    "eslint-plugin-jsdoc": "^48.0.4",
     "typescript": "^5.3.3"
   }
 }

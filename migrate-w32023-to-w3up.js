@@ -82,8 +82,8 @@ export async function * migrate({
         let copiedCarTo
         // we know receipt indicated successful store/add.
         // now let's upload the car bytes if the response hints we should
-        // @ts-ignore
-        switch (receipt.out.ok.status) {
+        // @ts-expect-error service types imperfect, but this should be resilient to unexpected ok types
+        switch (receipt.out?.ok?.status) {
           case "done":
             console.warn(`store/add ok indicates car ${add.part} was already in w3up`)
             break;
@@ -113,7 +113,7 @@ export async function * migrate({
                 headers: storeAddSuccess.headers,
                 body: carResponse.body,
                 redirect: 'follow',
-                // @ts-ignore
+                // @ts-expect-error not in types, but required for the body to work
                 duplex: 'half' 
               }
             )
@@ -135,10 +135,10 @@ export async function * migrate({
           }
           default:
             console.warn('unexpected store/add ok.status', receipt.out.ok)
-            // @ts-ignore
-            throw new Error(`unexpected store/add ok.status: ${receipt.out.ok.status}`)
-            // next part
-            continue
+            // @ts-expect-error receipt from service with imprecise types
+            throw new Error(`unexpected store/add ok.status: ${receipt.out?.ok?.status}`)
+            // // next part
+            // continue
         }
         // it's been added to the space. log that
         yield {
@@ -238,7 +238,6 @@ async function getDefaultW3upAgent() {
 }
 
 import confirm from '@inquirer/confirm';
-import { input } from '@inquirer/prompts';
 import {Web3Storage} from 'web3.storage'
 import promptForPassword from '@inquirer/password';
 
