@@ -14,7 +14,8 @@
   "eslintConfig": {
     "extends": [
       "eslint:recommended",
-      "plugin:@typescript-eslint/recommended"
+      "plugin:@typescript-eslint/recommended",
+      "plugin:jsdoc/recommended"
     ],
     "plugins": [
       "jsdoc",
@@ -22,6 +23,8 @@
     ],
     "rules": {
       "jsdoc/no-undefined-types": 1,
+      "jsdoc/require-returns": "off",
+      "jsdoc/require-yields": "off",
       "@typescript-eslint/no-unused-vars": ["warn", { "args": "none"}]
     },
     "env": {

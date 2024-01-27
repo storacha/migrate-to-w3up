@@ -17,6 +17,7 @@ if (isMain(import.meta.url, process.argv)) {
 
 /**
  * accept upload json as input, and emit a file decoded from it
+ * @param {string[]} argv - command line arguments
  */
 async function main(argv) {
   const args = parseArgs({
@@ -36,12 +37,17 @@ async function main(argv) {
     }
     const part = parts[0]
   
-    await fetchPartAndSaveToDisk(part)
+    await fetchPartAndSaveToDisk(part.response)
   }
 }
 
+/**
+ * fetch a part and save it to disk
+ * @param {Response} part - http response of CAR
+ */
 async function fetchPartAndSaveToDisk(part) {
-  const reader = await CarReader.fromIterable(part.response.body)
+  // @ts-expect-error readablestream types are weird
+  const reader = await CarReader.fromIterable(part.body)
   const roots = await reader.getRoots()
   for (const root of roots) {
     // const readRoot = await reader.get(root)

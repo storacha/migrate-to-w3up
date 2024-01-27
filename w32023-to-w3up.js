@@ -2,7 +2,7 @@ import { W32023Upload } from "./w32023.js";
 import * as Link from 'multiformats/link'
 
 /**
- * @param {W32023Upload} upload
+ * @param {W32023Upload} upload - upload to convert to store/add invocations
  */
 export async function * toStoreAdd(upload) {
   for (const part of upload.parts) {

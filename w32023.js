@@ -1,5 +1,5 @@
 /**
- * @fileoverview tools related to the upload JSON format served by old.web3.storage
+ * @file tools related to the upload JSON format served by old.web3.storage
  */
 
 import readNDJSONStream from 'ndjson-readablestream';
@@ -11,7 +11,7 @@ export class W32023UploadsFromNdjson {
   /** @type {AsyncIterable<Uint8Array>} */
   #uploadsNdjson
   /**
-   * @param {AsyncIterable<Uint8Array>} uploadsNdjson
+   * @param {AsyncIterable<Uint8Array>} uploadsNdjson - uploads as w32023 objects in ndjson
    */
   constructor(uploadsNdjson) {
     this.#uploadsNdjson = uploadsNdjson
@@ -61,14 +61,14 @@ export class W32023Upload {
   #upload;
 
   /**
-   * @param {string|object} input 
+   * @param {string|object} input - becomes a W32023Upload
    */
   static from (input) {
     const upload = typeof input === 'string' ? JSON.parse(input): input
     return new W32023Upload(upload)
   }
   /**
-   * @param {W32023Upload} upload 
+   * @param {W32023Upload} upload - becomes a W32023Upload
    */
   constructor(upload) {
     this.#upload = upload
