@@ -10,6 +10,7 @@ import { parseArgs } from 'node:util'
 import { Store, Upload } from '@web3-storage/capabilities'
 import { DID } from "@ucanto/validator"
 import { StoreConf } from '@web3-storage/access/stores/store-conf'
+import { select } from '@inquirer/prompts';
 
 /**
  * @typedef {import('@ucanto/interface').Delegation[]} Authorization
@@ -32,6 +33,144 @@ import { StoreConf } from '@web3-storage/access/stores/store-conf'
 /**
  * @typedef {AddUploadEvent|AddCarEvent} MigrationEvent
  */
+
+/**
+ * @param {object} options - options
+ * @param {(part: string) => Promise<Response>} options.fetchPart - given a part CID, fetch it and return a Response
+ */
+const transformUploadToUploadPartWithResponse = ({fetchPart}) => {
+ /**
+  * @param {W32023Upload} upload - upload with parts
+  * @param {TransformStreamDefaultController<{
+  *   part: string
+  *   upload: W32023Upload
+  *   response: Promise<Response>
+  * }>} controller - TransformStream controller. enqueue output to this.
+  */
+  return async (upload, controller) => {
+    for (const part of upload.parts) {
+      const partUrl = `https://w3s.link/ipfs/${part}`;
+      const withResponse = {
+        upload,
+        part,
+        response: fetchPart(partUrl),
+      }
+      controller.enqueue(withResponse)
+    }
+  }
+}
+
+/**
+ * @param {W32023Upload} upload - upload with parts to ensure we have responses for each of
+ * @param {Map<string, Map<string, { response: Response }>>} uploadCidToParts - Map<upload.cid, Map<part.cid, { response }>> - where to store state while waiting for all parts of an upload
+ */
+function receivedAllUploadParts(upload, uploadCidToParts) {
+  const partsReceived = uploadCidToParts.get(upload.cid)
+  for (const part of upload.parts) {
+    if ( ! partsReceived.has(part)) {
+      return false
+    }
+  }
+  return true
+}
+
+/**
+ * transform stream of fetched upload parts to a smaller stream with those parts grouped by upload and with all parts fetched.
+ * @param {object} options - options
+ * @param {AbortSignal} [options.signal] - for cancelling the migration
+ * @param {Map<string, Map<string, { response: Response }>>} [options.uploadCidToParts] - Map<upload.cid, Map<part.cid, { response }>> - where to store state while waiting for all parts of an upload
+ */
+const transformUploadPartWithResponseToUploadAndPartResponses = ({
+  signal,
+  uploadCidToParts = new Map
+}={}) => {
+  /**
+   * @param {{
+   *   part: string
+   *   upload: W32023Upload
+   *   response: Promise<Response>
+   * }} input - gets transformed by collecting common input with same upload and enqueuing a result when all part responses have been received.
+   * @param {Pick<TransformStreamDefaultController<{
+   *   upload: W32023Upload
+   *   parts: Map<string, {response: Response }>
+   * }>, 'enqueue'>} controller - output enqueued here
+   */
+  return async (input, controller) => {
+    signal?.throwIfAborted()
+    const {
+      upload,
+      part,
+    } = input
+    if ( ! uploadCidToParts.has(upload.cid)) {
+      uploadCidToParts.set(upload.cid, new Map)
+    }
+    const partsForUpload = uploadCidToParts.get(upload.cid)
+    if ( ! partsForUpload) throw new Error(`unexpected falsy parts`)
+    partsForUpload.set(part, {
+      response: await input.response,
+    })
+    
+    if (receivedAllUploadParts(upload, uploadCidToParts)) {
+      // console.debug('we have all car parts!', {
+      //   partsForUpload,
+      //   'upload.parts': upload.parts,
+      // })
+      // no need to keep this memory around
+      uploadCidToParts.delete(upload.cid)
+      signal?.throwIfAborted()
+      controller.enqueue({
+        upload,
+        parts: partsForUpload,
+      })
+    } else {
+      // console.debug('still waiting for car parts', {
+      //   'partsForUpload.size': partsForUpload.size,
+      //   'upload.parts.length': upload.parts.length,
+      // })
+    }
+    signal?.throwIfAborted()
+  }
+}
+
+/**
+ * @param {object} options - options
+ * @param {import("@ucanto/client").SignerKey} options.issuer - principal that will issue w3up invocations
+ * @param {Authorization} [options.authorization] - authorization sent with w3up invocations
+ * @param {import("@ucanto/client").ConnectionView} options.w3up - connection to w3up on which invocations will be sent
+ * @param {URL} options.destination - e.g. w3up space DID to which source uploads will be migrated
+ * @param {AbortSignal} [options.signal] - for cancelling the migration
+ * @param {ReadableStream<W32023Upload>} options.source - uploads that will be migrated from w32023 json format to w3up
+ * @param {number} [options.concurrency] - max concurrency for any phase of pipeline
+ * @param {(part: string) => Promise<Response>} options.fetchPart - given a part CID, return the fetched response
+ */
+export async function * migrateWithConcurrency({
+  issuer,
+  authorization,
+  w3up,
+  destination,
+  signal,
+  source,
+  concurrency = 1,
+  fetchPart,
+}) {
+  const results = source
+    .pipeThrough(new TransformStream(
+      { transform: transformUploadToUploadPartWithResponse({ fetchPart }) },
+    ))
+    .pipeThrough(new TransformStream(
+      { transform: transformUploadPartWithResponseToUploadAndPartResponses({ signal }) },
+      new CountQueuingStrategy({ highWaterMark: Math.max(1, concurrency) })
+    ))
+
+  const reader = results.getReader()
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) {
+      return;
+    }
+    yield value
+  }
+}
 
 /**
  * @param {object} options - options
@@ -71,9 +210,9 @@ export async function* migrate({
         w3up,
       )
       if (receipt.out.ok) {
-        console.warn('successfully invoked store/add with link=', add.nb.link)
+        // console.warn('successfully invoked store/add with link=', add.nb.link)
       } else {
-        console.warn('receipt.out', receipt.out)
+        // console.warn('receipt.out', receipt.out)
         throw Object.assign(
           new Error(`failure invoking store/add`),
           {
@@ -92,7 +231,7 @@ export async function* migrate({
       // @ts-expect-error service types imperfect, but this should be resilient to unexpected ok types
       switch (receipt.out?.ok?.status) {
         case "done":
-          console.warn(`store/add ok indicates car ${add.part} was already in w3up`)
+          // console.warn(`store/add ok indicates car ${add.part} was already in w3up`)
           break;
         case "upload": {
           // we need to upload car bytes
@@ -308,8 +447,6 @@ async function main(argv) {
     console.log(JSON.stringify(event, undefined, isInteractive ? 2 : undefined))
   }
 }
-
-import { select } from '@inquirer/prompts';
 
 /**
  * get a Space by using interactive cli prompts using inquirer

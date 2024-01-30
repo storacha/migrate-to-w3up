@@ -7,10 +7,9 @@ import * as CAR from "@ucanto/transport/car"
 import * as Client from '@ucanto/client'
 import * as ed25519 from '@ucanto/principal/ed25519'
 import * as Server from "@ucanto/server"
-import { ReadableStream, TransformStream } from 'stream/web'
-import { migrate } from './migrate-w32023-to-w3up.js'
-import { Parallel } from 'parallel-transform-web'
-import { createServer } from 'http'
+import { ReadableStream } from 'stream/web'
+import { migrate, migrateWithConcurrency } from './migrate-w32023-to-w3up.js'
+import { IncomingMessage, createServer } from 'http'
 
 /** example uploads from `w3 list --json` */
 const uploadsNdjson = `\
@@ -104,123 +103,177 @@ await test('can run migration to mock server', async () => {
   assert.ok(events.find(e => e.object.type.toLowerCase() === 'car'))
 })
 
-for (let concurrency = 1; concurrency <= 4; concurrency++) {
-  await test(`can map to store/add invocations in parallel concurrency=${concurrency}`, async () => {
-    let pulled = 0;
-    const createUploads = () => new globalThis.ReadableStream({
-      async pull(controller) {
-        console.log('start pull from upstream uploads', { pulled })
-        const upload = W32023Upload.from(uploadsNdjson.split('\n').filter(Boolean)[0])
-        pulled++
-        console.log('incremented pulled', pulled)
-        controller.enqueue(upload)
+await test(`can migrate with mock servers and concurrency`, async () => {
+  const uploads = createEndlessUploads()
+  /**
+   * @type {Map<string, Array<{
+   *   resolve:(v: any) => void
+   *   reject: (err?: Error) => void
+   * }>>}
+   */
+  class HangingRequests {
+    constructor() {
+      /**
+       * @type {Map<string, Array<{
+       *   resolve:(v: any) => void
+       *   reject: (err?: Error) => void
+       * }>>}
+       */
+      this.cidToHangs = new Map
+    }
+    get size() {
+      let count = 0;
+      for (const [, value] of this.cidToHangs.entries()) {
+        count += value.length
+      }
+      return count
+    }
+    *[Symbol.iterator]() {
+      for (const hangs of this.cidToHangs.values()) {
+        yield * hangs
+      }
+    }
+    delete(cid) {
+      this.cidToHangs.delete(cid)
+    }
+    push(cid, { resolve, reject }) {
+      const cleanup = () => {
+        this.delete(cid)
+      }
+      const hangs = this.cidToHangs.get(cid) ?? []
+      const hang = {
+        resolve(v) {
+          cleanup()
+          resolve(v)
+        },
+        reject(e) {
+          cleanup()
+          reject(e)
+        },
+      }
+      this.cidToHangs.set(cid, [...hangs, hang])
+    }
+  }
+  const hangs = new HangingRequests
+  const carFinder = createServer(createCarFinder({
+    cid(req) {
+      const lastPathSegmentMatch = req.url.match(/\/([^/]+)$/)
+      const cid = lastPathSegmentMatch && lastPathSegmentMatch[1]
+      return cid
+    },
+    headers(req) {
+      return {}
+    },
+    // hang all requests so we can control them.
+    // and ensure concurrency
+    async waitToRespond(req) {
+      const cid = this.cid(req)
+      await new Promise((resolve, reject) => {
+        hangs.push(cid, { resolve, reject })
+      })
+    }
+  }))
+  carFinder.listen(0)
+
+  try {
+    const { url } = await listening(carFinder)
+    const concurrency = 3
+
+    const space = await ed25519.generate()
+    const issuer = space
+    const connection = Client.connect({
+      id: issuer,
+      codec: CAR.outbound,
+      channel: await createMockW3upServer(),
+    })    
+    
+    const aborter = new AbortController
+
+    const migration = migrateWithConcurrency({
+      source: uploads.readable,
+      destination: new URL(space.did()),
+      issuer,
+      concurrency,
+      signal: aborter.signal,
+      w3up: connection,
+      fetchPart(cid) {
+        return fetch(new URL(`/ipfs/${cid}`, url))
       }
     })
-    const delay = n => new Promise(resolve => setImmediate(() => resolve(n)))
-    /** @typedef {TransformStream} */
-    const parallelize = new Parallel(concurrency, delay)
-    const transformed = createUploads().pipeThrough(parallelize)
-    const pull1 = await take(transformed.getReader())
-    assert.equal(pulled, concurrency + 1)
-    console.log('pull1', pull1)
-    console.log('pulled', pulled)
-  })
+
+    let maxHangSize = 0
+    /**
+     * @param {any} v - promise will resolve with this
+     * @param {number} ms - milliseconds to defer
+     */
+    const defer = (v, ms=1000) => new Promise((resolve) => setTimeout(() => resolve(v)))
+    await Promise.race([
+      async function () {
+        for await (const event of migration) {
+          console.log('migration event', event)
+          aborter.signal.throwIfAborted()
+        }
+      }(),
+      async function () {
+        while (await defer(true)) {
+          maxHangSize = Math.max(maxHangSize, hangs.size)
+          if (hangs.size > concurrency) {
+            throw new Error(`migration made a number of pending requests to fetchPart that exceeded options.concurrency, which shouldnt happen`)
+          } else if (hangs.size === concurrency) {
+            break;
+          }
+          aborter.signal.throwIfAborted()
+        }
+      }(),
+    ])
+    aborter.abort()
+
+    assert.equal(maxHangSize, concurrency, `maxHangSize === concurrency`)
+
+    for (const { resolve } of hangs) resolve()
+    assert.equal(hangs.size, 0)
+  } finally {
+    carFinder.close()
+    for (const { reject } of hangs) {
+      reject(new Error('hang still running when test ended'))
+    }
+  }
+})
+
+/**
+ * @param {object} options - options
+ * @param {(request: IncomingMessage) => string|undefined} options.cid - given request, return a relevant CAR CID to find
+ * @param {(request: IncomingMessage) => Record<string,string>} options.headers - given a request, return map that should be used for http response headers, e.g. to add a content-length header like w3s.link does.
+ * @param {(request: IncomingMessage) => Promise<any>} [options.waitToRespond] - if provided, this can return a promise that can defer responding
+ * @returns {import('http').RequestListener} request listener that mocks w3s.link
+ */
+function createCarFinder(options) {
+  return (req, res) => {
+    (options.waitToRespond?.(req) ?? Promise.resolve()).then(() => {
+      const cid = options.cid(req)
+      if ( ! cid) {
+        res.writeHead(404)
+        res.end('cant determine cid');
+        return;
+      }
+      const headers = options.headers(req) ?? {}
+      res.writeHead(200, {
+        ...headers
+      })
+      res.end()
+    })
+  }
 }
 
 /**
- * transformer that transforms each input to N outputs as yielded by a
- * fn (I) => AsyncIterable<O>
- * @template I
- * @template O
- * @implements {Transformer<I, O>}
+ * create an infinite stream of uploads
  */
-class SpreadTransformer {
-  /**
-   * @param {(input: I) => AsyncIterable<O>} spread - convert an input to zero or more outputs
-   */
-  constructor(spread) {
-    this.spread = spread
-  }
-  async transform(input, controller) {
-    for await (const output of this.spread(input)) {
-      controller.enqueue(output)
-    }
-  }
-}
-
-await test(`can transform w32023upload using TransformAddResponseFromHttp`, { only: true }, async () => {
-  const concurrency = 1
-  const uploads = createEndlessUploads()
-  /** @type {Map<string,number>} */
-  const contentLengthForCarPart = new Map
-  const carFinder = createServer((req, res) => {
-    const lastPathSegmentMatch = req.url.match(/\/([^/]+)$/)
-    const cid = lastPathSegmentMatch && lastPathSegmentMatch[1]
-    if ( ! cid) {
-      res.writeHead(404)
-      res.end('cant determine cid');
-      return;
-    }
-    const contentLength = Math.floor(Math.random() * 100)
-    contentLengthForCarPart.set(cid, contentLength)
-    res.writeHead(200, {
-      "content-length": contentLength,
-    })
-    res.end()
-  })
-  carFinder.listen(0)
-  try {
-    const { url } = await listening(carFinder)
-    const transformerUploadToUploadPartResponse = new SpreadTransformer(
-      /**
-       * @param {W32023Upload} upload - upload whose parts should be fetched
-       */
-      async function * (upload) {
-        for (const part of upload.parts) {
-          const partUrl = new URL(`/ipfs/${part}`, url)
-          const response = await fetch(partUrl)
-          yield {
-            upload,
-            part,
-            response,
-          }
-        }
-      })
-    const transformStreamAddingResponse = new TransformStream(transformerUploadToUploadPartResponse)
-    const upload1 = await take(uploads.readable.getReader())
-    const writer1 = transformStreamAddingResponse.writable.getWriter()
-    try {
-      await writer1.ready
-      writer1.write(upload1)
-      // close endless uploads. we only want 1 here.
-      writer1.close()
-    } finally {
-      writer1.releaseLock()
-    }
-    // wrote one upload into transform.
-    // now try to read
-    const reader1 = transformStreamAddingResponse.readable.getReader()
-    const i1 = await reader1.read()
-    assert.ok(!i1.done)
-    assert.ok(i1.value)
-    assert.deepEqual(i1.value.upload, upload1)
-    assert.ok(i1.value.response instanceof Response)
-    assert.equal(i1.value.response.headers.get('content-length'), contentLengthForCarPart.get(i1.value.part))
-    assert.equal(typeof i1.value.part, 'string')
-  } finally {
-    carFinder.close()
-  }
-  assert.equal(uploads.pulledCount, concurrency + 1)
-})
-
-/** create an infinite stream of uploads */
 function createEndlessUploads() {
   let pulledCount = 0
   const readable = new globalThis.ReadableStream({
     async pull(controller) {
       const upload = W32023Upload.from(uploadsNdjson.split('\n').filter(Boolean)[0])
       pulledCount++
-      console.log('incremented pulledCount', pulledCount)
       controller.enqueue(upload)
     }
   })
@@ -239,18 +292,38 @@ async function listening(server) {
 }
 
 /**
- * take one item from a stream reader, then release the lock
- * @template T
- * @param {ReadableStreamDefaultReader<T>} reader - reader to read from
+ * @param {object} [options] - options
+ * @param {Promise<import('@ucanto/interface').Signer>} [options.id] - 
  */
-async function take(reader) {
-  try {
-    const { done, value } = await reader.read()
-    if (done) {
-      throw new Error('EOF')
-    }
-    return value
-  } finally {
-    reader.releaseLock()
-  }
+async function createMockW3upServer(options={}) {
+  const id = await (options.id || ed25519.generate())
+  const invocations = []
+  const server = Server.create({
+    id,
+    service: {
+      store: {
+        add(invocation, ctx) {
+          invocations.push(invocation)
+          return {
+            ok: {
+              status: 'done',
+            }
+          }
+        }
+      },
+      upload: {
+        add(invocation, ctx) {
+          invocations.push(invocation)
+          return {
+            ok: {}
+          }
+        }
+      }
+    },
+    codec: CAR.inbound,
+    validateAuthorization: () => ({ ok: {} }),
+  })
+  return Object.assign(Object.create(server), {
+    get invocations() { return invocations }
+  })
 }
