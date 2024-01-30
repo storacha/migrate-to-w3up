@@ -43,7 +43,7 @@ import { select } from '@inquirer/prompts';
  * }} for each part in upload.parts
  * @param {(part: string) => Promise<Response>} fetchPart - given a part CID, fetch it and return a Response
  */
-const transformUploadToUploadPartWithResponse = async function * (upload, fetchPart) {
+const transformUploadToUploadPartWithResponse = async function* (upload, fetchPart) {
   for (const part of upload.parts) {
     const partUrl = `https://w3s.link/ipfs/${part}`;
     const withResponse = {
@@ -62,7 +62,7 @@ const transformUploadToUploadPartWithResponse = async function * (upload, fetchP
 function receivedAllUploadParts(upload, uploadCidToParts) {
   const partsReceived = uploadCidToParts.get(upload.cid)
   for (const part of upload.parts) {
-    if ( ! partsReceived.has(part)) {
+    if (!partsReceived.has(part)) {
       return false
     }
   }
@@ -70,61 +70,98 @@ function receivedAllUploadParts(upload, uploadCidToParts) {
 }
 
 /**
- * transform stream of fetched upload parts to a smaller stream with those parts grouped by upload and with all parts fetched.
+ * @implements {Transformer<
+ *   {
+ *     part: string
+ *     upload: W32023Upload
+ *     response: Promise<Response>
+ *   },
+ *   {
+ *     upload: W32023Upload
+ *     parts: Map<string, { response: Response }>
+ *   }
+ * >}
+ */
+class PartResponsesCollectedForUpload {
+  /**
+   * @param {AbortSignal} [signal] - emits event when this transformer should abort
+   */
+  constructor(signal) {
+    this.signal = signal
+  }
+  /**
+   * @param {{
+   *     part: string
+   *     upload: W32023Upload
+   *     response: Promise<Response>
+   * }} input - input for each part in upload.parts
+   * @param {TransformStreamDefaultController} controller - enqueue output here
+   */
+  async transform(input, controller) {
+    for await (const output of transformUploadPartWithResponseToUploadAndPartResponses(input, this)) {
+      controller.enqueue(output)
+    }
+  }
+}
+
+/**
+ * transform each upload part with fetched response,
+ * collect all parts for an upload,
+ * then yield { upload, parts }.
+ * If you want low memory usage, be sure to order inputs by upload.
+ * @param {{
+ *   part: string
+ *   upload: W32023Upload
+ *   response: Promise<Response>
+ * }} uploadPartWithResponse - input to transform
  * @param {object} options - options
  * @param {AbortSignal} [options.signal] - for cancelling the migration
  * @param {Map<string, Map<string, { response: Response }>>} [options.uploadCidToParts] - Map<upload.cid, Map<part.cid, { response }>> - where to store state while waiting for all parts of an upload
+ * @yields {{
+ *   upload: W32023Upload
+ *   parts: Map<string, { response: Response }>
+ * }} upload with all parts
  */
-const transformUploadPartWithResponseToUploadAndPartResponses = ({
-  signal,
-  uploadCidToParts = new Map
-}={}) => {
-  /**
-   * @param {{
-   *   part: string
-   *   upload: W32023Upload
-   *   response: Promise<Response>
-   * }} input - gets transformed by collecting common input with same upload and enqueuing a result when all part responses have been received.
-   * @param {Pick<TransformStreamDefaultController<{
-   *   upload: W32023Upload
-   *   parts: Map<string, {response: Response }>
-   * }>, 'enqueue'>} controller - output enqueued here
-   */
-  return async (input, controller) => {
-    signal?.throwIfAborted()
-    const {
-      upload,
-      part,
-    } = input
-    if ( ! uploadCidToParts.has(upload.cid)) {
-      uploadCidToParts.set(upload.cid, new Map)
-    }
-    const partsForUpload = uploadCidToParts.get(upload.cid)
-    if ( ! partsForUpload) throw new Error(`unexpected falsy parts`)
-    partsForUpload.set(part, {
-      response: await input.response,
-    })
-    
-    if (receivedAllUploadParts(upload, uploadCidToParts)) {
-      // console.debug('we have all car parts!', {
-      //   partsForUpload,
-      //   'upload.parts': upload.parts,
-      // })
-      // no need to keep this memory around
-      uploadCidToParts.delete(upload.cid)
-      signal?.throwIfAborted()
-      controller.enqueue({
-        upload,
-        parts: partsForUpload,
-      })
-    } else {
-      // console.debug('still waiting for car parts', {
-      //   'partsForUpload.size': partsForUpload.size,
-      //   'upload.parts.length': upload.parts.length,
-      // })
-    }
-    signal?.throwIfAborted()
+const transformUploadPartWithResponseToUploadAndPartResponses = async function* (
+  uploadPartWithResponse,
+  {
+    signal,
+    uploadCidToParts = new Map
+  } = {}
+) {
+  signal?.throwIfAborted()
+  const {
+    upload,
+    part,
+  } = uploadPartWithResponse
+  if (!uploadCidToParts.has(upload.cid)) {
+    uploadCidToParts.set(upload.cid, new Map)
   }
+  const partsForUpload = uploadCidToParts.get(upload.cid)
+  if (!partsForUpload) throw new Error(`unexpected falsy parts`)
+  partsForUpload.set(part, {
+    response: await uploadPartWithResponse.response,
+  })
+
+  if (receivedAllUploadParts(upload, uploadCidToParts)) {
+    // console.debug('we have all car parts!', {
+    //   partsForUpload,
+    //   'upload.parts': upload.parts,
+    // })
+    // no need to keep this memory around
+    uploadCidToParts.delete(upload.cid)
+    signal?.throwIfAborted()
+    yield {
+      upload,
+      parts: partsForUpload,
+    }
+  } else {
+    // console.debug('still waiting for car parts', {
+    //   'partsForUpload.size': partsForUpload.size,
+    //   'upload.parts.length': upload.parts.length,
+    // })
+  }
+  signal?.throwIfAborted()
 }
 
 /**
@@ -167,7 +204,7 @@ class UploadToEachPartWithResponse {
  * @param {number} [options.concurrency] - max concurrency for any phase of pipeline
  * @param {(part: string) => Promise<Response>} options.fetchPart - given a part CID, return the fetched response
  */
-export async function * migrateWithConcurrency({
+export async function* migrateWithConcurrency({
   issuer,
   authorization,
   w3up,
@@ -182,7 +219,8 @@ export async function * migrateWithConcurrency({
       new UploadToEachPartWithResponse({ fetchPart }),
     ))
     .pipeThrough(new TransformStream(
-      { transform: transformUploadPartWithResponseToUploadAndPartResponses({ signal }) },
+      new PartResponsesCollectedForUpload(signal),
+      // { transform: transformUploadPartWithResponseToUploadAndPartResponses({ signal }) },
       new CountQueuingStrategy({ highWaterMark: Math.max(1, concurrency) })
     ))
 
