@@ -35,28 +35,23 @@ import { select } from '@inquirer/prompts';
  */
 
 /**
- * @param {object} options - options
- * @param {(part: string) => Promise<Response>} options.fetchPart - given a part CID, fetch it and return a Response
+ * @param {W32023Upload} upload - upload with parts
+ * @yields {{
+ *   part: string
+ *   upload: W32023Upload
+ *   response: Promise<Response>
+ * }} for each part in upload.parts
+ * @param {(part: string) => Promise<Response>} fetchPart - given a part CID, fetch it and return a Response
  */
-const transformUploadToUploadPartWithResponse = ({fetchPart}) => {
- /**
-  * @param {W32023Upload} upload - upload with parts
-  * @param {TransformStreamDefaultController<{
-  *   part: string
-  *   upload: W32023Upload
-  *   response: Promise<Response>
-  * }>} controller - TransformStream controller. enqueue output to this.
-  */
-  return async (upload, controller) => {
-    for (const part of upload.parts) {
-      const partUrl = `https://w3s.link/ipfs/${part}`;
-      const withResponse = {
-        upload,
-        part,
-        response: fetchPart(partUrl),
-      }
-      controller.enqueue(withResponse)
+const transformUploadToUploadPartWithResponse = async function * (upload, fetchPart) {
+  for (const part of upload.parts) {
+    const partUrl = `https://w3s.link/ipfs/${part}`;
+    const withResponse = {
+      upload,
+      part,
+      response: fetchPart(partUrl),
     }
+    yield withResponse
   }
 }
 
@@ -133,6 +128,35 @@ const transformUploadPartWithResponseToUploadAndPartResponses = ({
 }
 
 /**
+ * @implements {Transformer<
+ *   W32023Upload,
+ *   {
+ *     part: string
+ *     upload: W32023Upload
+ *     response: Promise<Response>
+ *   }
+ * >}
+ */
+class UploadToEachPartWithResponse {
+  /**
+   * @param {object} options - options
+   * @param {(part: string) => Promise<Response>} options.fetchPart - given a part CID, return the fetched response
+   */
+  constructor({ fetchPart }) {
+    this.fetchPart = fetchPart
+  }
+  /**
+   * @param {W32023Upload} upload - upload to transform into one output per upload.part
+   * @param {TransformStreamDefaultController} controller - enqueue output her
+   */
+  async transform(upload, controller) {
+    for await (const out of transformUploadToUploadPartWithResponse(upload, this.fetchPart)) {
+      controller.enqueue(out)
+    }
+  }
+}
+
+/**
  * @param {object} options - options
  * @param {import("@ucanto/client").SignerKey} options.issuer - principal that will issue w3up invocations
  * @param {Authorization} [options.authorization] - authorization sent with w3up invocations
@@ -155,7 +179,7 @@ export async function * migrateWithConcurrency({
 }) {
   const results = source
     .pipeThrough(new TransformStream(
-      { transform: transformUploadToUploadPartWithResponse({ fetchPart }) },
+      new UploadToEachPartWithResponse({ fetchPart }),
     ))
     .pipeThrough(new TransformStream(
       { transform: transformUploadPartWithResponseToUploadAndPartResponses({ signal }) },
