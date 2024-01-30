@@ -22,13 +22,23 @@
       "@typescript-eslint"
     ],
     "rules": {
-      "jsdoc/no-undefined-types": 1,
+      "jsdoc/no-undefined-types": [1, {
+        "definedTypes": [
+          "AsyncIterable"
+        ]
+      }],
       "jsdoc/require-returns": "off",
       "jsdoc/require-yields": "off",
-      "@typescript-eslint/no-unused-vars": ["warn", { "args": "none"}]
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          "args": "none"
+        }
+      ]
     },
     "env": {
-      "node": true
+      "node": true,
+      "es2020": true
     },
     "parser": "@typescript-eslint/parser",
     "parserOptions": {
@@ -54,6 +64,7 @@
     "ipfs-unixfs-exporter": "^13.4.0",
     "multiformats": "^13.0.1",
     "ndjson-readablestream": "^1.1.0",
+    "parallel-transform-web": "^1.0.1",
     "web3.storage": "^4.5.5"
   },
   "bin": {
