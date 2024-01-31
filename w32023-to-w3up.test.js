@@ -10,6 +10,7 @@ import * as Server from "@ucanto/server"
 import { ReadableStream } from 'stream/web'
 import { migrate, migrateWithConcurrency } from './migrate-w32023-to-w3up.js'
 import { IncomingMessage, createServer } from 'http'
+import { MapCidToPromiseResolvers } from './promise.js'
 
 /** example uploads from `w3 list --json` */
 const uploadsNdjson = `\
@@ -103,58 +104,9 @@ await test('can run migration to mock server', async () => {
   assert.ok(events.find(e => e.object.type.toLowerCase() === 'car'))
 })
 
-await test(`can migrate with mock servers and concurrency`, async () => {
+await test('can migrate with mock servers and concurrency', async () => {
   const uploads = createEndlessUploads()
-  /**
-   * @type {Map<string, Array<{
-   *   resolve:(v: any) => void
-   *   reject: (err?: Error) => void
-   * }>>}
-   */
-  class HangingRequests {
-    constructor() {
-      /**
-       * @type {Map<string, Array<{
-       *   resolve:(v: any) => void
-       *   reject: (err?: Error) => void
-       * }>>}
-       */
-      this.cidToHangs = new Map
-    }
-    get size() {
-      let count = 0;
-      for (const [, value] of this.cidToHangs.entries()) {
-        count += value.length
-      }
-      return count
-    }
-    *[Symbol.iterator]() {
-      for (const hangs of this.cidToHangs.values()) {
-        yield * hangs
-      }
-    }
-    delete(cid) {
-      this.cidToHangs.delete(cid)
-    }
-    push(cid, { resolve, reject }) {
-      const cleanup = () => {
-        this.delete(cid)
-      }
-      const hangs = this.cidToHangs.get(cid) ?? []
-      const hang = {
-        resolve(v) {
-          cleanup()
-          resolve(v)
-        },
-        reject(e) {
-          cleanup()
-          reject(e)
-        },
-      }
-      this.cidToHangs.set(cid, [...hangs, hang])
-    }
-  }
-  const hangs = new HangingRequests
+  const hangs = new MapCidToPromiseResolvers
   const carFinder = createServer(createCarFinder({
     cid(req) {
       const lastPathSegmentMatch = req.url.match(/\/([^/]+)$/)
@@ -211,23 +163,9 @@ await test(`can migrate with mock servers and concurrency`, async () => {
      */
     const defer = (v, ms=1000) => new Promise((resolve) => setTimeout(() => resolve(v)))
 
-    /*
-    In Parallel, do:
-    * keep running the migration - knowing that for each cart part,
-      the migration will call `fetchPart(cid)` which will request carFinder
-      and not respond until we want it to. The hanging requests should
-      occupy one concurrency 'slot' but as long as there is more concurrency,
-      the migration should start fetching more car parts.
-    * Monitor to make sure there are never more hanging connections at carFinder
-      than the concurrency value, otherwise throw.
-      End when the number of hanging connection equals concurrency.
-
-    If the race completes, expect:
-    * there are probably hanging connections at carFinder (assert on this)
-    * ~ concurrency items were pulled from upstream uploads 
-    */
     let migrateError
     await Promise.race([
+      /** run migration and abort on errors */
       async function () {
         try {
           for await (const event of migration) {
@@ -239,6 +177,11 @@ await test(`can migrate with mock servers and concurrency`, async () => {
           aborter.abort(error)
         }
       }(),
+      /**
+       * Monitor to make sure there are never more hanging connections at carFinder
+       * than the concurrency value, otherwise throw.
+       * End when the number of hanging connection equals concurrency.
+       */
       async function () {
         while (await defer(true)) {
           maxHangSize = Math.max(maxHangSize, hangs.size)
@@ -269,8 +212,26 @@ await test(`can migrate with mock servers and concurrency`, async () => {
     aborter.abort()
 
     assert.ok( ! migrateError, 'migrate asyncgenerator didnt throw')
+    
+    let copiedABlock = false
+    for (const event of migrationEvents) {
+      assert.ok(event.upload instanceof W32023Upload, 'event.upload is a W32023Upload')
+      assert.ok(event.parts instanceof Map, 'event.parts is a Map of part cid to migrated part')
+      assert.equal(event.parts.size, event.upload.parts.length, 'migrated upload has one part for each part cid in input upload')
+      assert.ok(event.add.receipt.out.ok)
+      for (const [cid, migratedPart] of event.parts) {
+        assert.deepEqual(migratedPart.upload, event.upload)
+        assert.ok(migratedPart.upload.parts.includes(cid))
+        assert.ok(migratedPart.add.receipt.out.ok)
+        if (migratedPart.copy) {
+          copiedABlock = true
+        }
+      }
+    }
     assert.equal(migrationEvents.length, concurrency)
     assert.equal(maxHangSize, concurrency, `maxHangSize === concurrency`)
+    // @todo this should be true
+    assert.equal(copiedABlock, false)
   } finally {
     carFinder.close()
     for (const { reject } of hangs) {

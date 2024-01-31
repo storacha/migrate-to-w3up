@@ -267,7 +267,6 @@ class MigratedUploadOnePart {
   part
   /**
    * @type {{
-   *   invocation: unknown
    *   receipt: import('@ucanto/interface').Receipt<import("@web3-storage/access").StoreAddSuccess>
    * }}
    */
@@ -294,6 +293,28 @@ class MigratedUploadAllParts {
 }
 
 /**
+ * a single upload with all blocks migrated to w3up
+ * AND an upload/add receipt
+ */
+class MigratedUpload {
+  /** @type {W32023Upload} */
+  upload
+
+  /**
+   * @type {{
+   *  receipt: import('@ucanto/interface').Receipt<import("@web3-storage/access").UploadAddSuccess>
+   * }}
+   */
+  add
+
+  /**
+   * map of part CID to migrated part block
+   * @type {Map<string, MigratedUploadOnePart>}
+   */
+  parts
+}
+
+/**
  * @param {object} options - options
  * @param {import("@ucanto/client").SignerKey} options.issuer - principal that will issue w3up invocations
  * @param {Authorization} [options.authorization] - authorization sent with w3up invocations
@@ -303,6 +324,7 @@ class MigratedUploadAllParts {
  * @param {ReadableStream<W32023Upload>} options.source - uploads that will be migrated from w32023 json format to w3up
  * @param {number} [options.concurrency] - max concurrency for any phase of pipeline
  * @param {(part: string, options?: { signal?: AbortSignal }) => Promise<Response>} options.fetchPart - given a part CID, return the fetched response
+ * @yields {MigratedUpload}
  */
 export async function* migrateWithConcurrency({
   issuer,
@@ -355,7 +377,6 @@ export async function* migrateWithConcurrency({
           const output = {
             ...fetchablePart,
             add: {
-              invocation,
               // @ts-expect-error - receipt has no service type to guarantee StoreAddSuccess
               receipt,
             },
@@ -368,6 +389,38 @@ export async function* migrateWithConcurrency({
       )
     )
     .pipeThrough(new TransformStream(new CollectMigratedUploadParts))
+    // invoke upload/add
+    .pipeThrough(new TransformStream({
+      /**
+       * @param {MigratedUploadAllParts} param0 - upload with all parts migrated to destination
+       * @param {TransformStreamDefaultController<MigratedUpload>} controller - enqueue output here
+       */
+      async transform({ upload, parts }, controller) {
+        const shards = upload.parts.map(c => Link.parse(c).toV1())
+        const root = Link.parse(upload.cid)
+        const uploadAddReceipt = await Upload.add.invoke({
+          issuer,
+          audience: w3up.id,
+          proofs: authorization,
+          with: space,
+          nb: {
+            root,
+            // @ts-expect-error shards wants CAR links not any links
+            shards,
+          },
+        }).execute(
+          w3up,
+        )
+        if ( ! uploadAddReceipt.out.ok) {
+          console.log('uploadAddReceipt.out', uploadAddReceipt.out)
+          throw new Error(`upload/add failure`)
+        }
+        const receipt = /** @type {import('@ucanto/interface').Receipt<import("@web3-storage/access").UploadAddSuccess>} */ (
+          uploadAddReceipt
+        )
+        controller.enqueue({ upload, parts, add: { receipt } })
+      }
+    }))
     // todo still need to invoke upload/add
 
   const reader = results.getReader()
