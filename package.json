@@ -68,7 +68,7 @@
     "web3.storage": "^4.5.5"
   },
   "bin": {
-    "migrate-w32023-to-w3up": "./migrate-w32023-to-w3up.js"
+    "migrate-to-w3up": "./migrate-to-w3up.js"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^6.19.1",
