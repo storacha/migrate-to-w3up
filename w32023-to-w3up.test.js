@@ -8,7 +8,7 @@ import * as Client from '@ucanto/client'
 import * as ed25519 from '@ucanto/principal/ed25519'
 import * as Server from "@ucanto/server"
 import { ReadableStream } from 'stream/web'
-import { migrate, migrateWithConcurrency } from './migrate-w32023-to-w3up.js'
+import { migrateWithConcurrency } from './migrate-w32023-to-w3up.js'
 import { IncomingMessage, createServer } from 'http'
 import { MapCidToPromiseResolvers } from './promise.js'
 
@@ -42,66 +42,6 @@ await test('can convert stream of json to stream of uploads', async () => {
     assert.ok(typeof upload.cid, 'string')
   }
   assert.equal(uploadCount, 1)
-})
-
-await test('can run migration to mock server', async () => {
-  let storeAddInvocations = []
-  let uploadAddInvocations = []
-  const server = Server.create({
-    id: await ed25519.generate(),
-    service: {
-      store: {
-        add(invocation, ctx) {
-          storeAddInvocations.push(invocation)
-          return {
-            ok: {
-              status: 'done',
-            }
-          }
-        }
-      },
-      upload: {
-        add(invocation, ctx) {
-          uploadAddInvocations.push(invocation)
-          return {
-            ok: {}
-          }
-        }
-      }
-    },
-    codec: CAR.inbound,
-    validateAuthorization: () => ({ ok: {} }),
-  })
-
-  const space = await ed25519.generate()
-  const issuer = space
-  const connection = Client.connect({
-    id: issuer,
-    codec: CAR.outbound,
-    channel: server,
-  })
-  const uploads = new W32023UploadsFromNdjson(new ReadableStream({
-    start(c) {
-      c.enqueue(new TextEncoder().encode(uploadsNdjson))
-      c.close()
-    }
-  }))
-  const aborter = new AbortController
-  const migration = migrate({
-    issuer,
-    w3up: connection,
-    authorization: [],
-    source: uploads,
-    destination: new URL(space.did()),
-    signal: aborter.signal,
-  })
-  const events = []
-  for await (const event of migration) {
-    events.push(event)
-  }
-  assert.equal(events.length, 2)
-  assert.ok(events.find(e => e.object.type.toLowerCase() === 'upload'))
-  assert.ok(events.find(e => e.object.type.toLowerCase() === 'car'))
 })
 
 await test('can migrate with mock servers and concurrency', async () => {
