@@ -23,7 +23,6 @@ if (isMain(import.meta.url, process.argv)) {
  * get w3up-client with store from a good default store
  */
 async function getDefaultW3up() {
-  // @todo - we shouldn't need to reuse this store, though it's conventient for w3cli users.
   // instead, accept accept W3_PRINCIPAL and W3_PROOF env vars or flags 
   const store = new StoreConf({ profile: process.env.W3_STORE_NAME ?? 'w3cli' })
   const w3 = await w3up.create({ store })
