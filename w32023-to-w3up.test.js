@@ -8,7 +8,7 @@ import * as Client from '@ucanto/client'
 import * as ed25519 from '@ucanto/principal/ed25519'
 import * as Server from "@ucanto/server"
 import { ReadableStream } from 'stream/web'
-import { migrateWithConcurrency } from './migrate-w32023-to-w3up.js'
+import { migrate } from './migrate-w32023-to-w3up.js'
 import { IncomingMessage, createServer } from 'http'
 import { MapCidToPromiseResolvers } from './promise.js'
 
@@ -83,7 +83,7 @@ await test('can migrate with mock servers and concurrency', async () => {
     
     const aborter = new AbortController
 
-    const migration = migrateWithConcurrency({
+    const migration = migrate({
       source: uploads.readable,
       destination: new URL(space.did()),
       issuer,

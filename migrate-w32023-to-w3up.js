@@ -11,8 +11,13 @@ import { DID } from "@ucanto/validator"
 import { StoreConf } from '@web3-storage/access/stores/store-conf'
 import { select } from '@inquirer/prompts';
 import { Parallel } from 'parallel-transform-web'
+import confirm from '@inquirer/confirm';
+import { Web3Storage } from 'web3.storage'
+import promptForPassword from '@inquirer/password';
+import { MigratedUpload, MigratedUploadAllParts, MigratedUploadOnePart } from "./w3up-migration.js";
 
 /**
+ * proof of Authorization required to write to w3up
  * @typedef {import('@ucanto/interface').Delegation[]} Authorization
  */
 
@@ -33,20 +38,8 @@ import { Parallel } from 'parallel-transform-web'
  */
 
 /**
- * @param {W32023Upload} upload - upload with parts to ensure we have responses for each of
- * @param {Map<string, Map<string, any>>} uploadCidToParts - Map<upload.cid, Map<part.cid, unknown>> - where to store state while waiting for all parts of an upload
- */
-function receivedAllUploadParts(upload, uploadCidToParts) {
-  const partsReceived = uploadCidToParts.get(upload.cid)
-  for (const part of upload.parts) {
-    if (!partsReceived.has(part)) {
-      return false
-    }
-  }
-  return true
-}
-
-/**
+ * migrate one (car) part of an upload to w3up.
+ * this is called concurrently by `migrate` below.
  * @param {object} options - options
  * @param {import("@ucanto/client").SignerKey} options.issuer - principal that will issue w3up invocations
  * @param {Authorization} [options.authorization] - authorization sent with w3up invocations
@@ -91,9 +84,28 @@ async function migratePart({ part, signal, issuer, authorization, destination, w
 }
 
 /**
+ * use UploadPartWithResponse to get argument to store/add invocation.
+ * store/add requires .nb.size, which comes from the response 'content-length' header.
+ * @param {UploadPartWithResponse} options - options
+ */
+function carPartToStoreAddNb(options) {
+  const carSizeString = options.response.headers.get('content-length')
+  const carSize = carSizeString && parseInt(carSizeString, 10)
+  if (!carSize) {
+    throw new Error(`unable to determine carSize for response to ${options.response.url}`)
+  }
+  const link = Link.parse(options.part)
+  /** @type {import("@web3-storage/access").StoreAdd['nb']} */
+  const addNb = {
+    link,
+    size: carSize
+  }
+  return addNb
+}
+
+/**
  * transform each upload part with fetched response,
- * collect all parts for an upload,
- * then yield { upload, parts }.
+ * collect all parts for an upload, then yield { upload, parts }.
  * If you want low memory usage, be sure to order inputs by upload.
  * @param {MigratedUploadOnePart<W32023Upload>} migratedPart - input to transform
  * @param {object} options - options
@@ -119,7 +131,17 @@ const collectMigratedParts = async function* (
   if (!partsForUpload) throw new Error(`unexpected falsy parts`)
   partsForUpload.set(migratedPart.part, migratedPart)
 
-  if (receivedAllUploadParts(upload, uploadCidToParts)) {
+  let missingPart = false
+  const partsReceived = uploadCidToParts.get(upload.cid)
+  for (const part of upload.parts) {
+    if (!partsReceived.has(part)) {
+      missingPart = true
+      break;
+    }
+  }
+  const collectedAllParts = !missingPart
+
+  if (collectedAllParts) {
     // no need to keep this memory around
     uploadCidToParts.delete(upload.cid)
     /** @type {MigratedUploadAllParts<W32023Upload>} */
@@ -137,13 +159,16 @@ const collectMigratedParts = async function* (
 }
 
 /**
+ * given stream of migrated upload parts (preferably with parts from same upload in sequence),
+ * transform to stream of migrated uploads with all parts.
+ * i.e. 'group by upload'
  * @implements {Transformer<
  *   MigratedUploadOnePart<W32023Upload>,
  *   MigratedUploadAllParts<W32023Upload>
  * >}
  */
 class CollectMigratedUploadParts {
-  static join = collectMigratedParts
+  static collectMigratedParts = collectMigratedParts
   /**
    * @param {AbortSignal} [signal] - emits event when this transformer should abort
    */
@@ -156,7 +181,7 @@ class CollectMigratedUploadParts {
    */
   async transform(input, controller) {
     try {
-      for await (const output of CollectMigratedUploadParts.join(input, this)) {
+      for await (const output of CollectMigratedUploadParts.collectMigratedParts(input, this)) {
         controller.enqueue(output)
       }
     } catch (error) {
@@ -167,6 +192,8 @@ class CollectMigratedUploadParts {
 }
 
 /**
+ * transform each upload into many upload.parts + add method for part to be fetched
+ * (e.g. via http) to get the referent of the part link, i.e. the part car bytes
  * @param {W32023Upload} upload - upload with parts
  * @param {(part: string, options?: { signal?: AbortSignal }) => Promise<Response>} fetchPart - given a part CID, fetch it and return a Response
  * @yields {FetchableUploadPart} for each part in upload.parts
@@ -186,13 +213,15 @@ const transformUploadToFetchableUploadPart = async function* (upload, fetchPart)
 }
 
 /**
+ * transform each upload into many upload.parts + add method for part to be fetched
+ * (e.g. via http) to get the referent of the part link, i.e. the part car bytes.
  * @implements {Transformer<
  *   W32023Upload,
  *   FetchableUploadPart
  * >}
  */
 class UploadToFetchableUploadPart {
-  static spread = transformUploadToFetchableUploadPart
+  static transformUploadToFetchableUploadPart = transformUploadToFetchableUploadPart
   /**
    * @param {object} options - options
    * @param {(part: string, options?: { signal?: AbortSignal }) => Promise<Response>} options.fetchPart - given a part CID, return the fetched response
@@ -205,31 +234,17 @@ class UploadToFetchableUploadPart {
    * @param {TransformStreamDefaultController} controller - enqueue output her
    */
   async transform(upload, controller) {
-    for await (const out of UploadToFetchableUploadPart.spread(upload, this.fetchPart)) {
+    for await (const out of UploadToFetchableUploadPart.transformUploadToFetchableUploadPart(upload, this.fetchPart)) {
       controller.enqueue(out)
     }
   }
 }
 
 /**
- * @param {UploadPartWithResponse} options - options
- */
-function carPartToStoreAddNb(options) {
-  const carSizeString = options.response.headers.get('content-length')
-  const carSize = carSizeString && parseInt(carSizeString, 10)
-  if (!carSize) {
-    throw new Error(`unable to determine carSize for response to ${options.response.url}`)
-  }
-  const link = Link.parse(options.part)
-  /** @type {import("@web3-storage/access").StoreAdd['nb']} */
-  const addNb = {
-    link,
-    size: carSize
-  }
-  return addNb
-}
-
-/**
+ * when store/add succeeds, the result instructs the client how to ensure w3up has the block bytes.
+ * This function handles that instruction,
+ * doing nothing if the StoreAddSuccess indicates w3up already has the block,
+ * and piping car bytes to the instructed destination if not.
  * @param {import("@web3-storage/access").StoreAddSuccess} storeAddSuccess - successful store/add result
  * @param {ReadableStream<Uint8Array>} car - car bytes
  * @param {object} [options] - options
@@ -277,6 +292,8 @@ async function uploadBlockForStoreAddSuccess(
 }
 
 /**
+ * given info about an upload with all parts migrated to w3up,
+ * invoke upload/add with the part links to complete migrating the upload itself.
  * @param {MigratedUploadAllParts<W32023Upload>} upload - upload with all parts migrated to destination
  * @param {object} options - options
  * @param {import("@ucanto/client").ConnectionView} options.w3up - connection to w3up on which invocations will be sent
@@ -313,6 +330,8 @@ async function transformInvokeUploadAddForMigratedUploadParts({ upload, parts },
 }
 
 /**
+ * transform stream of info about uploads with all parts migrated to w3up,
+ * into stream of info about uploads migrated via successful upload/add invocation linking to parts.
  * @implements {Transformer<
  *   MigratedUploadAllParts<W32023Upload>,
  *   MigratedUpload<W32023Upload>
@@ -340,6 +359,8 @@ class InvokeUploadAddForMigratedParts {
 }
 
 /**
+ * migrate from w32023 to w3up.
+ * returns an AsyncIterable of migration events as they occur.
  * @param {object} options - options
  * @param {import("@ucanto/client").SignerKey} options.issuer - principal that will issue w3up invocations
  * @param {Authorization} [options.authorization] - authorization sent with w3up invocations
@@ -351,7 +372,7 @@ class InvokeUploadAddForMigratedParts {
  * @param {(part: string, options?: { signal?: AbortSignal }) => Promise<Response>} options.fetchPart - given a part CID, return the fetched response
  * @yields {MigratedUpload<W32023Upload>}
  */
-export async function* migrateWithConcurrency(options) {
+export async function* migrate(options) {
   const {
     issuer,
     authorization,
@@ -385,6 +406,7 @@ export async function* migrateWithConcurrency(options) {
   }
 }
 
+// if this file is being executed directly, run main() function
 const isMain = (url, argv = process.argv) => fileURLToPath(url) === fs.realpathSync(argv[1])
 if (isMain(import.meta.url, process.argv)) {
   main(process.argv).catch(error => console.error('error in main()', error))
@@ -410,11 +432,6 @@ async function getDefaultW3upAgent() {
   const access = w3._agent
   return access
 }
-
-import confirm from '@inquirer/confirm';
-import { Web3Storage } from 'web3.storage'
-import promptForPassword from '@inquirer/password';
-import { MigratedUpload, MigratedUploadAllParts, MigratedUploadOnePart } from "./w3up-migration.js";
 
 /**
  * main function that runs when this file is executed.
@@ -450,7 +467,7 @@ async function main(argv) {
     source = await getUploadsFromPrompts()
     isInteractive = true
   }
-  const migration = migrateWithConcurrency({
+  const migration = migrate({
     issuer: agent.issuer,
     w3up: agent.connection,
     source,
