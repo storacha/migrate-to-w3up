@@ -120,13 +120,8 @@ const collectMigratedParts = async function* (
   partsForUpload.set(migratedPart.part, migratedPart)
 
   if (receivedAllUploadParts(upload, uploadCidToParts)) {
-    // console.debug('we have all car parts!', {
-    //   partsForUpload,
-    //   'upload.parts': upload.parts,
-    // })
     // no need to keep this memory around
     uploadCidToParts.delete(upload.cid)
-    signal?.throwIfAborted()
     /** @type {MigratedUploadAllParts<W32023Upload>} */
     const allparts = {
       upload,
@@ -139,7 +134,6 @@ const collectMigratedParts = async function* (
     //   'upload.parts.length': upload.parts.length,
     // })
   }
-  signal?.throwIfAborted()
 }
 
 /**
