@@ -162,7 +162,9 @@ await test(`can migrate with mock servers and concurrency`, async () => {
       return cid
     },
     headers(req) {
-      return {}
+      return {
+        'content-length': String(100),
+      }
     },
     // hang all requests so we can control them.
     // and ensure concurrency
@@ -196,10 +198,11 @@ await test(`can migrate with mock servers and concurrency`, async () => {
       concurrency,
       signal: aborter.signal,
       w3up: connection,
-      fetchPart(cid) {
-        return fetch(new URL(`/ipfs/${cid}`, url))
+      fetchPart(cid, { signal }) {
+        return fetch(new URL(`/ipfs/${cid}`, url), { signal })
       }
     })
+    const migrationEvents = []
 
     let maxHangSize = 0
     /**
@@ -207,11 +210,33 @@ await test(`can migrate with mock servers and concurrency`, async () => {
      * @param {number} ms - milliseconds to defer
      */
     const defer = (v, ms=1000) => new Promise((resolve) => setTimeout(() => resolve(v)))
+
+    /*
+    In Parallel, do:
+    * keep running the migration - knowing that for each cart part,
+      the migration will call `fetchPart(cid)` which will request carFinder
+      and not respond until we want it to. The hanging requests should
+      occupy one concurrency 'slot' but as long as there is more concurrency,
+      the migration should start fetching more car parts.
+    * Monitor to make sure there are never more hanging connections at carFinder
+      than the concurrency value, otherwise throw.
+      End when the number of hanging connection equals concurrency.
+
+    If the race completes, expect:
+    * there are probably hanging connections at carFinder (assert on this)
+    * ~ concurrency items were pulled from upstream uploads 
+    */
+    let migrateError
     await Promise.race([
       async function () {
-        for await (const event of migration) {
-          console.log('migration event', event)
-          aborter.signal.throwIfAborted()
+        try {
+          for await (const event of migration) {
+            migrationEvents.push(event)
+            if (aborter.signal.aborted) break
+          }
+        } catch (error) {
+          migrateError = error
+          aborter.abort(error)
         }
       }(),
       async function () {
@@ -219,19 +244,33 @@ await test(`can migrate with mock servers and concurrency`, async () => {
           maxHangSize = Math.max(maxHangSize, hangs.size)
           if (hangs.size > concurrency) {
             throw new Error(`migration made a number of pending requests to fetchPart that exceeded options.concurrency, which shouldnt happen`)
-          } else if (hangs.size === concurrency) {
+          }
+          if (aborter.signal.aborted) return
+          if (hangs.size === concurrency) {
+            await new Promise((resolve) => setImmediate(resolve))
             break;
           }
-          aborter.signal.throwIfAborted()
         }
       }(),
     ])
-    aborter.abort()
 
-    assert.equal(maxHangSize, concurrency, `maxHangSize === concurrency`)
+    assert.equal(hangs.size, concurrency, `hangs.size === concurrency`)
+
+    // we dont promise it will be exactly concurrency + 2, but there shouldn't be any reason to fetch more than that
+    assert.ok(uploads.pulledCount <= (concurrency+2), 'didnt pull more than needed to satisfy concurrency')
 
     for (const { resolve } of hangs) resolve()
     assert.equal(hangs.size, 0)
+
+    // tick to allow migration to flow
+    await new Promise((resolve) => setImmediate(resolve))
+
+    // stop the migration
+    aborter.abort()
+
+    assert.ok( ! migrateError, 'migrate asyncgenerator didnt throw')
+    assert.equal(migrationEvents.length, concurrency)
+    assert.equal(maxHangSize, concurrency, `maxHangSize === concurrency`)
   } finally {
     carFinder.close()
     for (const { reject } of hangs) {
