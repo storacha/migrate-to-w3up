@@ -7,7 +7,7 @@ import * as ed25519 from '@ucanto/principal/ed25519'
 import * as Server from "@ucanto/server"
 import { migrate } from './w32023-to-w3up.js'
 import { IncomingMessage, createServer } from 'http'
-import { MapCidToPromiseResolvers } from './promise.js'
+import { MapCidToPromiseResolvers } from './utils.js'
 import { ReadableStream, TransformStream } from 'stream/web'
 
 /** example uploads from `w3 list --json` */
