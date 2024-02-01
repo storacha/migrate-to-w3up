@@ -1,8 +1,6 @@
 import { test } from 'node:test'
 import { W32023Upload, W32023UploadsFromNdjson } from './w32023.js'
-import fromW32023ToW3up from './w32023-to-w3up.js'
 import assert from 'assert'
-import * as Link from 'multiformats/link'
 import * as CAR from "@ucanto/transport/car"
 import * as Client from '@ucanto/client'
 import * as ed25519 from '@ucanto/principal/ed25519'
@@ -16,17 +14,6 @@ import { ReadableStream, TransformStream } from 'stream/web'
 const uploadsNdjson = `\
 {"_id":"1","type":"Car","name":"Upload at 2024-01-19T04:40:04.490Z","created":"2024-01-19T04:40:04.49+00:00","updated":"2024-01-19T04:40:04.49+00:00","cid":"bafybeihtddvvufnzdcetubq5mbv2rvgjchlipf6y7esei5qzg4r7re7rju","dagSize":2949303,"pins":[{"status":"Pinned","updated":"2024-01-19T04:40:04.49+00:00","peerId":"bafzbeibhqavlasjc7dvbiopygwncnrtvjd2xmryk5laib7zyjor6kf3avm","peerName":"elastic-ipfs","region":null}],"parts":["bagbaieraclriozt34fk5ej3aa7k67es2hyq5zyc3ohivgbee4qeyyeroqb4a"],"deals":[]}\
 `
-
-// add later 
-
-await test('can convert one upload to a store/add', async () => {
-  const upload = W32023Upload.from(uploadsNdjson.split('\n').filter(Boolean)[0])
-  const adds = []
-  for await (const a of fromW32023ToW3up.toStoreAdd(upload)) { adds.push(a) }
-  assert.equal(adds.length, 1)
-  assert.equal(adds[0].nb.size, 2949554)
-  assert.equal(adds[0].nb.link.toString(), Link.parse("bagbaieraclriozt34fk5ej3aa7k67es2hyq5zyc3ohivgbee4qeyyeroqb4a").toString())
-})
 
 await test('can convert stream of json to stream of uploads', async () => {
   const ndjson = new ReadableStream({
