@@ -11,7 +11,7 @@ import { select } from '@inquirer/prompts';
 import confirm from '@inquirer/confirm';
 import { Web3Storage } from 'web3.storage'
 import promptForPassword from '@inquirer/password';
-import { migrate } from "./migrate-w32023-to-w3up.js";
+import { migrate } from "./w32023-to-w3up.js";
 import { receiptToJson } from "./w3up-migration.js";
 
 // if this file is being executed directly, run main() function
