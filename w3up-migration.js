@@ -62,3 +62,36 @@ export class MigratedUpload {
    */
   parts
 }
+
+/**
+ * @param {import('@ucanto/interface').Receipt} r - receipt
+ */
+export function receiptToJson(r) {
+  return {
+    type: 'Receipt',
+    ran: 'root' in r.ran ? invocationToJson(r.ran) : r,
+    out: {
+      ok: r.out.ok,
+      error: r.out.error,
+    },
+    fx: r.fx,
+    meta: r.meta,
+    issuer: r.issuer,
+    signature: r.signature,
+  }
+}
+
+/**
+ * @param {import('@ucanto/interface').Invocation} i - invocation
+ */
+function invocationToJson(i) {
+  return {
+    type: 'Invocation',
+    cid: i.cid,
+    issuer: i.issuer.did(),
+    audience: i.audience.did(),
+    capabilities: i.capabilities,
+    signature: i.signature,
+    expiration: i.expiration,
+  }
+}

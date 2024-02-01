@@ -12,6 +12,7 @@ import confirm from '@inquirer/confirm';
 import { Web3Storage } from 'web3.storage'
 import promptForPassword from '@inquirer/password';
 import { migrate } from "./migrate-w32023-to-w3up.js";
+import { receiptToJson } from "./w3up-migration.js";
 
 // if this file is being executed directly, run main() function
 const isMain = (url, argv = process.argv) => fileURLToPath(url) === fs.realpathSync(argv[1])
@@ -110,16 +111,8 @@ async function main(argv) {
  * @param {any} value - json property value
  */
 function stringifyForMigrationProgressStdio(key, value) {
-  if (key === 'receipt') {
-    return {
-      ran: value.ran,
-      out: value.out,
-      fx: value.fx,
-      meta: value.meta,
-      issuer: value.issuer.did(),
-      proofs: value.proofs,
-      signature: value.signature,
-    }
+  if (key === 'receipt' && value) {
+    return receiptToJson(value)
   }
   if (value instanceof Map) {
     return Object.fromEntries(value.entries())
