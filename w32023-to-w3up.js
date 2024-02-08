@@ -123,9 +123,9 @@ async function migratePart({ part, signal, issuer, authorization, destination, w
 /**
  * use UploadPartWithResponse to get argument to store/add invocation.
  * store/add requires .nb.size, which comes from the response 'content-length' header.
- * @param {UploadPartWithResponse} options - options
+ * @param {Pick<UploadPartWithResponse, 'part'|'response'>} options - options
  */
-function carPartToStoreAddNb(options) {
+export function carPartToStoreAddNb(options) {
   const carSizeString = options.response.headers.get('content-length')
   const carSize = carSizeString && parseInt(carSizeString, 10)
   if (!carSize) {

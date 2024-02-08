@@ -11,8 +11,9 @@ import { select } from '@inquirer/prompts';
 import confirm from '@inquirer/confirm';
 import { Web3Storage } from 'web3.storage'
 import promptForPassword from '@inquirer/password';
-import { migrate } from "./w32023-to-w3up.js";
+import { carPartToStoreAddNb, migrate } from "./w32023-to-w3up.js";
 import { receiptToJson } from "./w3up-migration.js";
+import { Store } from "@web3-storage/capabilities";
 
 // if this file is being executed directly, run main() function
 const isMain = (url, argv = process.argv) => fileURLToPath(url) === fs.realpathSync(argv[1])
@@ -47,16 +48,27 @@ async function getDefaultW3upAgent() {
  * @param {string[]} argv - command line arguments
  */
 async function main(argv) {
+  const args = argv.slice(2)
+
+  // <space.did> store/add --link {cid}
+  if ('store/add' === args[1]) {
+    const space = DID.match({ method: 'key' }).from(args[0])
+    const flags = args.slice(2)
+    return await migratePartCli(space, flags)
+  }
+
   const { values } = parseArgs({
-    args: argv.slice(2),
+    args,
     options: {
       space: {
         type: 'string',
         help: 'space DID to migrate to',
-      }
-    }
+      },
+    },
   })
+
   const agent = await getDefaultW3upAgent()
+
   // source of uploads is stdin by default
   /** @type {AsyncIterable<W32023Upload>} */
   let source
@@ -111,6 +123,39 @@ async function main(argv) {
   for await (const event of migration) {
     console.log(JSON.stringify(event, stringifyForMigrationProgressStdio, isInteractive ? 2 : undefined))
   }
+}
+
+/**
+ * cli for 'store add' command.
+ * should get space DID from --space and CID from --link and then invoke store/add on the space
+ * @param {import("@web3-storage/access").SpaceDID} spaceDid - did of space to add to
+ * @param {string[]} args - cli flags to parse
+ */
+async function migratePartCli(spaceDid, args) {
+  const agent = await getDefaultW3upAgent()
+  const { values } = parseArgs({
+    args,
+    options: {
+      link: {
+        type: 'string',
+        help: 'CID to migrate',
+      },
+    },
+  })
+  const authorization = agent.proofs([{ can: 'store/add', with: spaceDid }])
+  const add = Store.add.invoke({
+    issuer: agent.issuer,
+    audience: agent.connection.id,
+    with: spaceDid,
+    nb: carPartToStoreAddNb({
+      part: values.link,
+      response: await fetch(`https://w3s.link/ipfs/${values.link}`),
+    }),
+    proofs: authorization,
+  })
+  // @ts-expect-error agent.connection has no service type
+  const receipt = await add.execute(agent.connection)
+  console.log(JSON.stringify(receipt.out, undefined, 2))
 }
 
 /**
