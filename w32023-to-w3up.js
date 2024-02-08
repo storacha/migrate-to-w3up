@@ -6,6 +6,54 @@ import { Parallel } from 'parallel-transform-web'
 import { MigratedUpload, MigratedUploadAllParts, MigratedUploadOnePart } from "./w3up-migration.js";
 
 /**
+ * migrate from w32023 to w3up.
+ * returns an AsyncIterable of migration events as they occur.
+ * @param {object} options - options
+ * @param {import("@ucanto/client").SignerKey} options.issuer - principal that will issue w3up invocations
+ * @param {Authorization} [options.authorization] - authorization sent with w3up invocations
+ * @param {import("@ucanto/client").ConnectionView} options.w3up - connection to w3up on which invocations will be sent
+ * @param {URL} options.destination - e.g. w3up space DID to which source uploads will be migrated
+ * @param {AbortSignal} [options.signal] - for cancelling the migration
+ * @param {ReadableStream<W32023Upload>} options.source - uploads that will be migrated from w32023 json format to w3up
+ * @param {number} [options.concurrency] - max concurrency for any phase of pipeline
+ * @param {(part: string, options?: { signal?: AbortSignal }) => Promise<Response>} options.fetchPart - given a part CID, return the fetched response
+ * @yields {MigratedUpload<W32023Upload>}
+ */
+export async function* migrate(options) {
+  const {
+    issuer,
+    authorization,
+    w3up,
+    destination,
+    signal,
+    source,
+    concurrency = 1,
+    fetchPart,
+  } = options;
+  if (concurrency < 1) {
+    throw new Error(`concurrency must be at least 1`)
+  }
+  const results = source
+    .pipeThrough(new TransformStream(new UploadToFetchableUploadPart({ fetchPart })))
+    .pipeThrough(
+      new Parallel(concurrency, (part) => migratePart({
+        ...options,
+        part,
+      }))
+    )
+    .pipeThrough(new TransformStream(new CollectMigratedUploadParts))
+    .pipeThrough(new TransformStream(new InvokeUploadAddForMigratedParts({ w3up, issuer, destination, authorization, signal })))
+  const reader = results.getReader()
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) {
+      return;
+    }
+    yield value
+  }
+}
+
+/**
  * proof of Authorization required to write to w3up
  * @typedef {import('@ucanto/interface').Delegation[]} Authorization
  */
@@ -344,53 +392,5 @@ class InvokeUploadAddForMigratedParts {
     this.transform = async function transform(uploadedParts, controller) {
       controller.enqueue(await InvokeUploadAddForMigratedParts.transform(uploadedParts, { w3up, issuer, authorization, destination, signal }))
     }
-  }
-}
-
-/**
- * migrate from w32023 to w3up.
- * returns an AsyncIterable of migration events as they occur.
- * @param {object} options - options
- * @param {import("@ucanto/client").SignerKey} options.issuer - principal that will issue w3up invocations
- * @param {Authorization} [options.authorization] - authorization sent with w3up invocations
- * @param {import("@ucanto/client").ConnectionView} options.w3up - connection to w3up on which invocations will be sent
- * @param {URL} options.destination - e.g. w3up space DID to which source uploads will be migrated
- * @param {AbortSignal} [options.signal] - for cancelling the migration
- * @param {ReadableStream<W32023Upload>} options.source - uploads that will be migrated from w32023 json format to w3up
- * @param {number} [options.concurrency] - max concurrency for any phase of pipeline
- * @param {(part: string, options?: { signal?: AbortSignal }) => Promise<Response>} options.fetchPart - given a part CID, return the fetched response
- * @yields {MigratedUpload<W32023Upload>}
- */
-export async function* migrate(options) {
-  const {
-    issuer,
-    authorization,
-    w3up,
-    destination,
-    signal,
-    source,
-    concurrency = 1,
-    fetchPart,
-  } = options;
-  if (concurrency < 1) {
-    throw new Error(`concurrency must be at least 1`)
-  }
-  const results = source
-    .pipeThrough(new TransformStream(new UploadToFetchableUploadPart({ fetchPart })))
-    .pipeThrough(
-      new Parallel(concurrency, (part) => migratePart({
-        ...options,
-        part,
-      }))
-    )
-    .pipeThrough(new TransformStream(new CollectMigratedUploadParts))
-    .pipeThrough(new TransformStream(new InvokeUploadAddForMigratedParts({ w3up, issuer, destination, authorization, signal })))
-  const reader = results.getReader()
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) {
-      return;
-    }
-    yield value
   }
 }

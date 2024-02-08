@@ -48,6 +48,7 @@ async function getDefaultW3upAgent() {
  */
 async function main(argv) {
   const { values } = parseArgs({
+    args: argv.slice(2),
     options: {
       space: {
         type: 'string',
@@ -55,7 +56,6 @@ async function main(argv) {
       }
     }
   })
-
   const agent = await getDefaultW3upAgent()
   // source of uploads is stdin by default
   /** @type {AsyncIterable<W32023Upload>} */
@@ -69,15 +69,23 @@ async function main(argv) {
     source = await getUploadsFromPrompts()
     isInteractive = true
   }
-
   let spaceValue = values.space
+    // if interactive, we can use env vars and check for confirmation
+    ?? (isInteractive ? (process.env.W3_SPACE ?? process.env.WEB3_SPACE) : undefined)
+  let spaceValueConfirmed
+  if (spaceValue && isInteractive) {
+    spaceValueConfirmed = await confirm({ message: `migrate to destination space ${spaceValue}?` })
+    if ( ! spaceValueConfirmed) {
+      spaceValue = undefined
+    }
+  }
   if (isInteractive && !spaceValue) {
     const chosenSpace = await promptForSpace()
     console.warn('using space', chosenSpace.did())
     spaceValue = chosenSpace.did()
   }
   if ( ! spaceValue) {
-    throw new Error(`pass migration destination with \`--space <space.did>\`.`)
+    throw new Error(`Unable to determine migration destination. Will not migrate.`)
   }
   const space = DID.match({ method: 'key' }).from(spaceValue)
 

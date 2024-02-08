@@ -50,6 +50,7 @@ Just pipe in [ndjson][] of old.web3.storage Uploads objects.
 # or do `w3 space use <space>` first
 space=$(w3 space info --json | jq '.did' -r)
 
+# define a command to get uploads as migration source
 alias w32023-export='npx @web3-storage/w3@latest list --json'
 
 migrate-to-w3up --space="$space" \
@@ -63,7 +64,24 @@ migrate-to-w3up --space="$space" \
 w32023-export | migrate-to-w3up --space="$space" | jq
 ```
 
+## How it Works
+
+### [w32023-to-w3up.js](./w32023-to-w3up.js)
+
+* exports a `migrate` function that runs a migration, returning an `AsyncIterable` of `MigratedUpload<W32023Upload>` that includes [ucanto receipts][] for every request sent to w3up as part of the migration.
+
+### [migrate-to-w3up.js](./migrate-to-w3up.js)
+
+* this is the main [bin]() script that runs when the package is globally installed and someone runs `migrate-to-w3up`
+* it reads cli flags to build options for `migrate`. If some options aren't provided as flags, and there is an interactive terminal, prompt the terminal for the options required to start a migration, e.g. selecting a `source` of uploads and `destination` (e.g. space DID).
+* it calls `migrate` from w32023-to-w3up.js and interprets the results as CLI output
+  * it writes [ndjson][] to stdout, and any errors/warnings to stderr.
+  * it is recommended to pipe the output of this to a file so it can be explored later to check receipts or explore logs for debugging. But you can also pipe to `jq` to pretty print the ndjson output for ad-hoc exploration.
+
+<!-- references -->
+
 [ndjson]: https://en.wikipedia.org/wiki/JSON_streaming
 [unix filter]: https://en.wikipedia.org/wiki/Unix_philosophy#Mike_Gancarz:_The_UNIX_Philosophy
 [w3up space]: https://web3.storage/docs/how-to/create-space/
 [w3 storage provider]: https://github.com/web3-storage/specs/blob/main/w3-provider.md
+[ucanto receipts]: https://github.com/web3-storage/ucanto/pull/266
