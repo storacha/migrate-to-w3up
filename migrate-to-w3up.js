@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { W32023Upload, W32023UploadsFromNdjson } from "./w32023.js";
 import { fileURLToPath } from 'url'
 import fs from 'fs'
@@ -13,7 +14,10 @@ import { Web3Storage } from 'web3.storage'
 import promptForPassword from '@inquirer/password';
 import { carPartToStoreAddNb, migrate } from "./w32023-to-w3up.js";
 import { receiptToJson } from "./w3up-migration.js";
+import * as Link from 'multiformats/link'
 import { Store } from "@web3-storage/capabilities";
+import { fromString } from 'uint8arrays'
+import * as Digest from 'multiformats/hashes/digest'
 
 // if this file is being executed directly, run main() function
 const isMain = (url, argv = process.argv) => fileURLToPath(url) === fs.realpathSync(argv[1])
@@ -148,7 +152,7 @@ async function migratePartCli(spaceDid, args) {
     audience: agent.connection.id,
     with: spaceDid,
     nb: carPartToStoreAddNb({
-      part: values.link,
+      part: stringToCarCid(values.link).toString(),
       response: await fetch(`https://w3s.link/ipfs/${values.link}`),
     }),
     proofs: authorization,
@@ -216,4 +220,35 @@ async function getUploadsFromPrompts() {
   const oldW3 = new Web3Storage({ token })
   const uploads = oldW3.list()
   return uploads
+}
+
+
+// multicodec codec for CAR bytes
+const CAR_CODE = 0x0202
+
+/**
+ * Attempts to extract a CAR CID from a bucket key.
+ *
+ * @param {string} key
+ */
+const stringToCarCid = key => {
+  let errParseCid
+  try {
+    // recent buckets encode CAR CID in filename
+    const cid = Link.parse(key).toV1()
+    return cid
+  } catch (err) {
+    errParseCid = err
+  }
+  // older buckets base32 encode a CAR multihash <base32(car-multihash)>.car
+  // try to parse as base32
+  let errParseBase32
+  try {
+    const digestBytes = fromString(key, 'base32')
+    const digest = Digest.decode(digestBytes)
+    return Link.create(CAR_CODE, digest)
+  } catch (error) {
+    errParseBase32 = error
+    throw error
+  }
 }

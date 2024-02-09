@@ -64,6 +64,34 @@ migrate-to-w3up --space="$space" \
 w32023-export | migrate-to-w3up --space="$space" | jq
 ```
 
+### migrate a single CAR part
+
+Runs a single `store/add` invocation with the provided CAR link and show the output (this is mostly for w3up debuggers).
+
+```shell
+# base32 multihash CAR link
+migrate-to-w3up $space store/add --link ciqgrph67ihh4imym4pl6d4xlnfhgxycdr4hcm6g6ucnzuxzqsorpsq
+
+# CIDv1 CAR link
+migrate-to-w3up $space store/add --link bagbaieranc6p56qopyqzqzy6x4hzow2konpqehdyoez4n5ie3tjptbe5c7fa
+```
+
+Example
+
+```shell
+⚡ migrate-to-w3up $space store/add --link ciqgrph67ihh4imym4pl6d4xlnfhgxycdr4hcm6g6ucnzuxzqsorpsq
+{
+  "ok": {
+    "link": {
+      "/": "bagbaieranc6p56qopyqzqzy6x4hzow2konpqehdyoez4n5ie3tjptbe5c7fa"
+    },
+    "with": "did:key:z6MkvSvQTdY87Rkazj3JiTquqQzjCAgWBuoWodPSHY6josAp",
+    "status": "done",
+    "allocated": 0
+  }
+}
+```
+
 ## How it Works
 
 ### [w32023-to-w3up.js](./w32023-to-w3up.js)
