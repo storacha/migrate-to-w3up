@@ -228,8 +228,7 @@ const CAR_CODE = 0x0202
 
 /**
  * Attempts to extract a CAR CID from a bucket key.
- *
- * @param {string} key
+ * @param {string} key - string to parse to a CAR CID. e.g. a carpark bucket key basename
  */
 const stringToCarCid = key => {
   let errParseCid

@@ -17,6 +17,7 @@ import { MigratedUpload, MigratedUploadAllParts, MigratedUploadOnePart } from ".
  * @param {ReadableStream<W32023Upload>} options.source - uploads that will be migrated from w32023 json format to w3up
  * @param {number} [options.concurrency] - max concurrency for any phase of pipeline
  * @param {(part: string, options?: { signal?: AbortSignal }) => Promise<Response>} options.fetchPart - given a part CID, return the fetched response
+ * @param {(receipt: import("@ucanto/interface").Receipt) => any} [options.onStoreAddReceipt] - called with each store/add invocation receipt
  * @yields {MigratedUpload<W32023Upload>}
  */
 export async function* migrate(options) {
@@ -84,8 +85,9 @@ export async function* migrate(options) {
  * @param {FetchableUploadPart} options.part - upload to transform
  * @param {URL} options.destination - e.g. w3up space DID to which source uploads will be migrated
  * @param {AbortSignal} [options.signal] - for cancelling the migration
+ * @param {(receipt: import("@ucanto/interface").Receipt) => any} [options.onStoreAddReceipt] - called with each store/add invocation receipt
  */
-async function migratePart({ part, signal, issuer, authorization, destination, w3up }) {
+async function migratePart({ part, signal, issuer, authorization, destination, w3up, onStoreAddReceipt }) {
   signal?.throwIfAborted()
   const space = DID.match({ method: 'key' }).from(destination.toString())
   const partFetchResponse = await part.fetch({ signal })
@@ -98,6 +100,7 @@ async function migratePart({ part, signal, issuer, authorization, destination, w
     nb: addNb,
   })
   const receipt = await invocation.execute(w3up)
+  onStoreAddReceipt?.(receipt)
   const storeAddSuccess = receipt.out.ok
   const copyResponse = storeAddSuccess && await uploadBlockForStoreAddSuccess(
     // @ts-expect-error no svc type

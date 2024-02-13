@@ -295,6 +295,101 @@ await test('can migrate with mock servers and concurrency', async () => {
   }
 })
 
+await test('can migrate in a way that throws when encountering status=upload', async () => {
+  let uploadLimit = 3
+  let uploadLimitRemaining = uploadLimit
+  const uploads = createEndlessUploads().readable.pipeThrough(new TransformStream({
+    async transform(chunk, controller) {
+      if (uploadLimitRemaining <= 0) throw new Error('limit reached');
+      controller.enqueue(chunk)
+      if (--uploadLimitRemaining <= 0) {
+        controller.terminate()
+      }
+    }
+  }))
+  // mock w3s.link. It just needs to be realistic-ish so the migration can build a store/add invocation
+  // to send to the mock w3up
+  const carFinder = createServer(createCarFinder({
+    cid(req) {
+      const lastPathSegmentMatch = req.url.match(/\/([^/]+)$/)
+      const cid = lastPathSegmentMatch && lastPathSegmentMatch[1]
+      return cid
+    },
+    headers(req) {
+      return {
+        'content-length': String(100),
+      }
+    },
+  }))
+  carFinder.listen(0)
+  await new Promise((resolve) => carFinder.addListener('listening', () => resolve()))
+  try {
+    await testCanMigrateWithNoCopy()
+  } finally {
+    carFinder.close()
+  }
+  /**
+   * test with a running carFinder service.
+   */
+  async function testCanMigrateWithNoCopy() {
+    const { url } = await locate(carFinder)
+    const space = await ed25519.generate()
+    const issuer = space
+    const connection = Client.connect({
+      id: issuer,
+      codec: CAR.outbound,
+      // mock w3up will always return status=upload.
+      // we'll call migrate() in such a way that it throws when encountering this
+      // and assert that the throw happens
+      channel: await createMockW3upServer({
+        store: {
+          async add(invocation) {
+            /** @type {import('@web3-storage/access').StoreAddSuccessUpload} */
+            const response = {
+              status: 'upload',
+              url: 'https://example.com',
+              headers: {},
+              allocated: 0,
+              with: invocation.capabilities[0].with,
+              link: invocation.capabilities[0].nb.link
+            }
+            return {
+              ok: response
+            }
+          }
+        }
+      }),
+    })
+    const aborter = new AbortController
+    let onStoreAddReceiptCallCount = 0;
+    const migration = migrate({
+      source: uploads,
+      destination: new URL(space.did()),
+      issuer,
+      signal: aborter.signal,
+      w3up: connection,
+      fetchPart(cid, { signal }) {
+        return fetch(new URL(`/ipfs/${cid}`, url), { signal })
+      },
+      onStoreAddReceipt(receipt) {
+        onStoreAddReceiptCallCount++
+        if (receipt.out.ok.status !== 'done') {
+          throw new Error('unexpected store/add receipt')
+        }
+      }
+    })
+    let migrationEventCount = 0
+    await assert.rejects((async () => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const event of migration) {
+        migrationEventCount++
+      }
+    })())
+    assert.equal(onStoreAddReceiptCallCount, 1, 'onStoreAddReceipt called')
+    assert.equal(migrationEventCount, 0, 'no migration events yielded from migration because it encountered unexpected store/add response')
+  }
+})
+
 /**
  * @param {object} options - options
  * @param {(request: IncomingMessage) => string|undefined} [options.cid] - given request, return a relevant CAR CID to find
@@ -333,6 +428,7 @@ function createCarFinder(options) {
  */
 function createEndlessUploads() {
   let pulledCount = 0
+  /** @type {ReadableStream<W32023Upload>} */
   const readable = new ReadableStream({
     async pull(controller) {
       const upload = W32023Upload.from(uploadsNdjson.split('\n').filter(Boolean)[0])
