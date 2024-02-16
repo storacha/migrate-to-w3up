@@ -68,6 +68,10 @@ async function main(argv) {
         type: 'string',
         help: 'space DID to migrate to',
       },
+      'expect-store-add-status': {
+        type: 'string',
+        help: "If pesent, migration with stop with error if it encounters a store/add response whose status is not this value.  ",
+      }
     },
   })
 
@@ -112,6 +116,12 @@ async function main(argv) {
     destination: new URL(space),
     async fetchPart(cid, { signal }) {
       return await fetch(new URL(`/ipfs/${cid}`, 'https://w3s.link'), { signal })
+    },
+    onStoreAddReceipt(receipt) {
+      const expectedStatus = values['expect-store-add-status']
+      if (expectedStatus && (receipt.out.ok.status !== expectedStatus)) {
+        throw Object.assign(new Error('unexpected store/add receipt'), { receipt })
+      }
     },
     authorization: agent.proofs([
       {
