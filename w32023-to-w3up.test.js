@@ -9,6 +9,7 @@ import { migrate } from './w32023-to-w3up.js'
 import { IncomingMessage, createServer } from 'http'
 import { MapCidToPromiseResolvers } from './utils.js'
 import { ReadableStream, TransformStream } from 'stream/web'
+import { UploadPartMigrationFailure } from './w3up-migration.js'
 
 /** example uploads from `w3 list --json` */
 const uploadsNdjson = `\
@@ -211,8 +212,9 @@ await test('can migrate with mock servers and concurrency', async () => {
       concurrency,
       signal: aborter.signal,
       w3up: connection,
-      fetchPart(cid, { signal }) {
-        return fetch(new URL(`/ipfs/${cid}`, url), { signal })
+      async fetchPart(cid, { signal }) {
+        const response = await fetch(new URL(`/ipfs/${cid}`, url), { signal })
+        return response
       }
     })
     const migrationEvents = []
@@ -257,7 +259,6 @@ await test('can migrate with mock servers and concurrency', async () => {
         }
       }(),
     ])
-
     assert.equal(hangs.size, concurrency, `hangs.size === concurrency`)
 
     // we dont promise it will be exactly concurrency + 2, but there shouldn't be any reason to fetch more than that
@@ -288,7 +289,7 @@ await test('can migrate with mock servers and concurrency', async () => {
     assert.equal(migrationEvents.length, concurrency)
     assert.equal(maxHangSize, concurrency, `maxHangSize === concurrency`)
   } finally {
-    carFinder.close()
+    await new Promise((resolve, reject) => carFinder.close(error => error ? reject(error) : resolve()))
     for (const { reject } of hangs) {
       reject(new Error('hang still running when test ended'))
     }
@@ -379,14 +380,18 @@ await test('can migrate in a way that throws when encountering status=upload', a
       }
     })
     let migrationEventCount = 0
-    await assert.rejects((async () => {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      for await (const event of migration) {
-        migrationEventCount++
+    let failures = []
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    for await (const event of migration) {
+      migrationEventCount++
+      if (event instanceof UploadPartMigrationFailure) {
+        failures.push(event)
+        break;
       }
-    })())
+    }
     assert.equal(onStoreAddReceiptCallCount, 1, 'onStoreAddReceipt called')
-    assert.equal(migrationEventCount, 0, 'no migration events yielded from migration because it encountered unexpected store/add response')
+    assert.equal(migrationEventCount, 1, 'one migration event yielded from migration')
+    assert.equal(failures.length, 1)
   }
 })
 

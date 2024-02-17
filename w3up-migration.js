@@ -64,6 +64,23 @@ export class MigratedUpload {
 }
 
 /**
+ * @template Upload
+ * @template {Error} [E=Error]
+ * 
+ * a single upload that could not be migrated due to an Error
+ */
+export class UploadPartMigrationFailure {
+  /** @type {import('multiformats').Link} */
+  part
+
+  /** @type {Upload} */
+  upload
+
+  /** @type {E} */
+  cause
+}
+
+/**
  * @param {import('@ucanto/interface').Receipt} r - receipt
  */
 export function receiptToJson(r) {
