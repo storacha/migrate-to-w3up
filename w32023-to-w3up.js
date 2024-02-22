@@ -3,7 +3,7 @@ import * as Link from 'multiformats/link'
 import { Store, Upload } from '@web3-storage/capabilities'
 import { DID } from "@ucanto/validator"
 import { Parallel } from 'parallel-transform-web'
-import { MigratedUpload, MigratedUploadAllParts, MigratedUploadOnePart, UploadPartMigrationFailure } from "./w3up-migration.js";
+import { MigrateUploadFailure, MigratedUpload, MigratedUploadAllParts, MigratedUploadOnePart, UploadPartMigrationFailure } from "./w3up-migration.js";
 
 /**
  * migrate from w32023 to w3up.
@@ -34,8 +34,8 @@ export async function* migrate(options) {
   if (concurrency < 1) {
     throw new Error(`concurrency must be at least 1`)
   }
-  /** @type {Array<UploadPartMigrationFailure>} */
-  const partFailures = []
+  /** @type {Array<UploadPartMigrationFailure|MigrateUploadFailure<W32023Upload>>} */
+  const failures = []
   const results = source
     .pipeThrough(new TransformStream(new UploadToFetchableUploadPart({ fetchPart })))
     .pipeThrough(
@@ -47,21 +47,36 @@ export async function* migrate(options) {
           throw error
         }
         // represent this unexpected error as a PartMigrationFailure
-        // and add it to a queue to be yielded by the returned generator
+        // and pass it along
         const failure = new UploadPartMigrationFailure()
         failure.part = fetchablePart.part
         failure.cause = error
         failure.upload = fetchablePart.upload
-        partFailures.push(failure)
+        return failure
       }))
     )
     .pipeThrough(new TransformStream(new CollectMigratedUploadParts))
+    .pipeThrough(new TransformStream({
+      /**
+       * @param {MigrateUploadFailure<W32023Upload>|MigratedUploadAllParts<W32023Upload>} item - item to transform
+       * @param {TransformStreamDefaultController} controller - stream controller
+       */
+      async transform(item, controller) {
+        // put any failures in the queue to yield out,
+        // but pass successes along
+        if ('cause' in item) {
+          failures.push(item)
+        } else {
+          controller.enqueue(item)
+        }
+      }
+    }))
     .pipeThrough(new TransformStream(new InvokeUploadAddForMigratedParts({ w3up, issuer, destination, authorization, signal })))
   const reader = results.getReader()
   const queue = []
   let resultsDone = false
   while (true) {
-    if (resultsDone && !partFailures.length && !queue.length) break;
+    if (resultsDone && !failures.length && !queue.length) break;
     while (queue.length) yield queue.pop()
     // watch for results and failures at same time,
     // adding any results/failures to queue to get yielded
@@ -77,8 +92,8 @@ export async function* migrate(options) {
         // until race is aborted, also watch for failures
         (async () => {
           while (!raceAbort.signal.aborted) {
-            while (partFailures.length) {
-              queue.push(partFailures.pop())
+            while (failures.length) {
+              queue.push(failures.pop())
             }
             if (queue.length) return;
             await new Promise((resolve) => setImmediate(resolve))
@@ -147,6 +162,18 @@ async function migratePart({ part, signal, issuer, authorization, destination, w
   })
   const receipt = await invocation.execute(w3up)
   onStoreAddReceipt?.(receipt)
+
+  // if store/add did not succeed, return info about Failure
+  if (receipt.out.error) {
+    /** @type {UploadPartMigrationFailure<W32023Upload>} */
+    const failure = Object.assign(new UploadPartMigrationFailure, {
+      part: part.part,
+      cause: receipt.out.error,
+      upload: part.upload, 
+    })
+    return failure
+  }
+
   const storeAddSuccess = receipt.out.ok
   const copyResponse = storeAddSuccess && await uploadBlockForStoreAddSuccess(
     // @ts-expect-error no svc type
@@ -193,10 +220,10 @@ export function carPartToStoreAddNb(options) {
  * transform each upload part with fetched response,
  * collect all parts for an upload, then yield { upload, parts }.
  * If you want low memory usage, be sure to order inputs by upload.
- * @param {MigratedUploadOnePart<W32023Upload>} migratedPart - input to transform
+ * @param {MigratedUploadOnePart<W32023Upload>|UploadPartMigrationFailure<W32023Upload>} migratedPart - input to transform
  * @param {object} options - options
  * @param {AbortSignal} [options.signal] - for cancelling the migration
- * @param {Map<string, Map<string, MigratedUploadOnePart<W32023Upload>>>} [options.uploadCidToParts] - Map<upload.cid, Map<part.cid, { response }>> - where to store state while waiting for all parts of an upload
+ * @param {Map<string, Map<string, MigratedUploadOnePart<W32023Upload>|UploadPartMigrationFailure<W32023Upload>>>} [options.uploadCidToParts] - Map<upload.cid, Map<part.cid, { response }>> - where to store state while waiting for all parts of an upload
  * @yields {MigratedUploadAllParts<W32023Upload>} upload with all parts
  */
 const collectMigratedParts = async function* (
@@ -230,12 +257,27 @@ const collectMigratedParts = async function* (
   if (collectedAllParts) {
     // no need to keep this memory around
     uploadCidToParts.delete(upload.cid)
-    /** @type {MigratedUploadAllParts<W32023Upload>} */
-    const allparts = {
-      upload,
-      parts: partsForUpload,
+    const partFailureCount = [...partsForUpload].filter(([cid, partMigration]) => {
+      // will be true if it's a failure but not if part success
+      return 'cause' in partMigration
+    }).length
+    if (partFailureCount > 0) {
+      /** @type {MigrateUploadFailure<W32023Upload>} */
+      const fail = Object.assign(new MigrateUploadFailure, {
+        upload,
+        parts: partsForUpload,
+        cause: new Error(`Failed to migrate ${partFailureCount}/${upload.parts.length} upload parts`),
+      })
+      yield fail
+    } else {
+      /** @type {MigratedUploadAllParts<W32023Upload>} */
+      const allparts = {
+        upload,
+        // @ts-expect-error we ensure this has no failures via hasPartFailure
+        parts: partsForUpload,
+      }
+      yield allparts
     }
-    yield allparts
   } else {
     // console.debug('still waiting for car parts', {
     //   'partsForUpload.size': partsForUpload.size,

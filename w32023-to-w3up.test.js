@@ -9,7 +9,7 @@ import { migrate } from './w32023-to-w3up.js'
 import { IncomingMessage, createServer } from 'http'
 import { MapCidToPromiseResolvers } from './utils.js'
 import { ReadableStream, TransformStream } from 'stream/web'
-import { UploadPartMigrationFailure } from './w3up-migration.js'
+import { MigrateUploadFailure, UploadPartMigrationFailure } from './w3up-migration.js'
 
 /** example uploads from `w3 list --json` */
 const uploadsNdjson = `\
@@ -384,7 +384,7 @@ await test('can migrate in a way that throws when encountering status=upload', a
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     for await (const event of migration) {
       migrationEventCount++
-      if (event instanceof UploadPartMigrationFailure) {
+      if (event instanceof MigrateUploadFailure) {
         failures.push(event)
         break;
       }
@@ -392,6 +392,110 @@ await test('can migrate in a way that throws when encountering status=upload', a
     assert.equal(onStoreAddReceiptCallCount, 1, 'onStoreAddReceipt called')
     assert.equal(migrationEventCount, 1, 'one migration event yielded from migration')
     assert.equal(failures.length, 1)
+  }
+})
+
+/**
+ * sometimes the migration will get an unexpected error when invoking store/add for a piece.
+ * When this happens, the asyncIterable should return an object that represents the failure to migrate an upload.
+ * Then, whoever is doing the iterable can decide how to respond: either by aborting the migration or by continuing onward.
+ */
+await test('can migrate tolerating store/add invocation errors', async () => {
+  // we'll have 3 uploads to migrate.
+  // all these uploads only have one part.
+  // We'll mock out the server side such that the first upload migrates ok, the second errors, and the third is ok
+  const uploads = createEndlessUploads({ limit: 3 }).readable
+  // mock w3s.link. It just needs to be realistic-ish so the migration can build a store/add invocation
+  // to send to the mock w3up
+  const carFinder = createServer(createCarFinder({
+    cid(req) {
+      const lastPathSegmentMatch = req.url.match(/\/([^/]+)$/)
+      const cid = lastPathSegmentMatch && lastPathSegmentMatch[1]
+      return cid
+    },
+    headers(req) {
+      return {
+        'content-length': String(100),
+      }
+    },
+  }))
+  carFinder.listen(0)
+  await new Promise((resolve) => carFinder.addListener('listening', () => resolve()))
+  try {
+    await testCanMigrateToleratingErrors((await locate(carFinder)).url)
+  } finally {
+    carFinder.close()
+  }
+  /**
+   * test with a running carFinder service.
+   * @param {URL} carFinderLocation - url to car finder service
+   */
+  async function testCanMigrateToleratingErrors(carFinderLocation) {
+    const space = await ed25519.generate()
+    const issuer = space
+    let storeAddResponseCount = 0
+    const connection = Client.connect({
+      id: issuer,
+      codec: CAR.outbound,
+      // mock w3up so the first store/add invocation works, and all subsequent
+      // store/add invocations result in an unexpected error (i.e. simulated unexpected 500)
+      channel: await createMockW3upServer({
+        store: {
+          async add(invocation) {
+            let error
+            /** @type {import('@web3-storage/access').StoreAddSuccessDone} */
+            let ok
+            // error on second
+            if (storeAddResponseCount === 1) {
+              error = new Error(`fake error from mock store/add handler in testCanMigrateToleratingErrors`)
+            } else {
+              // always say status=done because that way we dont need to mock out an upload target
+              ok = {
+                status: 'done',
+                allocated: 0,
+                with: invocation.capabilities[0].with,
+                link: invocation.capabilities[0].nb.link
+              }
+            }
+            storeAddResponseCount++
+            if (error) {
+              throw error
+            }
+            return { ok }
+          }
+        }
+      }),
+    })
+    const aborter = new AbortController
+    const migration = migrate({
+      source: uploads,
+      destination: new URL(space.did()),
+      issuer,
+      signal: aborter.signal,
+      w3up: connection,
+      fetchPart(cid, { signal }) {
+        return fetch(new URL(`/ipfs/${cid}`, carFinderLocation), { signal })
+      },
+    })
+    let migrationEventCount = 0
+    let failures = []
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    for await (const event of migration) {
+      migrationEventCount++
+      if (event instanceof MigrateUploadFailure) {
+        failures.push(event)
+      }
+    }
+    assert.equal(migrationEventCount, 3, 'migration events yielded from migration')
+    assert.equal(failures.length, 1)
+    const failure0 = failures[0]
+    assert.ok(failure0.upload.cid)
+    assert.match(failure0.cause.toString(), /failed to migrate \d+\/\d+ upload parts/i)
+    assert.equal(failure0.parts.size, 1)
+    const failure0Part0 = failure0.parts.get(failure0.upload.parts[0])
+    assert.ok(failure0Part0 instanceof UploadPartMigrationFailure)
+    // @ts-expect-error tolerate 'unknown'
+    assert.match(failure0Part0.cause.cause.message, /fake error from mock store\/add handler in testCanMigrateToleratingErrors/i)
   }
 })
 
@@ -430,13 +534,20 @@ function createCarFinder(options) {
 
 /**
  * create an infinite stream of uploads
+ * @param {object} [options] options
+ * @param {number} [options.limit] max upload to emit before closing stream
  */
-function createEndlessUploads() {
+function createEndlessUploads({ limit = Infinity }={}) {
   let pulledCount = 0
   /** @type {ReadableStream<W32023Upload>} */
   const readable = new ReadableStream({
     async pull(controller) {
+      if (pulledCount >= limit) {
+        controller.close()
+        return;
+      }
       const upload = W32023Upload.from(uploadsNdjson.split('\n').filter(Boolean)[0])
+      upload._id = Math.random().toString().slice(2)
       pulledCount++
       controller.enqueue(upload)
     }
@@ -471,7 +582,14 @@ async function createMockW3upServer(options = {}) {
         add(invocation, ctx) {
           invocations.push(invocation)
           if (options?.store?.add) {
-            return options.store.add(invocation)
+            try {
+              return options.store.add(invocation)
+            } catch (error) {
+              console.error('uncaught error calling createMockW3upServer options.store.add', error)
+              return {
+                error,
+              }
+            }
           }
           return {
             ok: {

@@ -67,10 +67,10 @@ export class MigratedUpload {
  * @template Upload
  * @template {Error} [E=Error]
  * 
- * a single upload that could not be migrated due to an Error
+ * a single upload *car part* that could not be migrated due to an Error
  */
 export class UploadPartMigrationFailure {
-  /** @type {import('multiformats').Link} */
+  /** @type {string} */
   part
 
   /** @type {Upload} */
@@ -78,6 +78,26 @@ export class UploadPartMigrationFailure {
 
   /** @type {E} */
   cause
+}
+
+/**
+ * @template Upload
+ * @template {Error} [E=Error]
+ * 
+ * a single upload that could not be migrated due to an Error
+ */
+export class MigrateUploadFailure {
+  /** @type {Upload} */
+  upload
+
+  /** @type {E} */
+  cause
+
+  /**
+   * map of part CID to migrated part block (or failure to migrate part)
+   * @type {Map<string, MigratedUploadOnePart<Upload>|UploadPartMigrationFailure<Upload>>}
+   */
+  parts
 }
 
 /**
