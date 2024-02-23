@@ -19,11 +19,14 @@ const migrateToW3upPath = fileURLToPath(new URL('./migrate-to-w3up.js', import.m
 
 /**
  * create a RequestListener that can be a mock up.web3.storage
+ * @param {object} [options] - options
+ * @param {(invocation: import('@ucanto/server').ProviderInput<import('@ucanto/client').InferInvokedCapability<typeof Store.add>>) => Promise<void>} [options.onHandleStoreAdd] - store/add handler
  */
-async function createMockW3up() {
+async function createMockW3up(options={}) {
   const service = {
     store: {
       add: Server.provide(Store.add, async (invocation) => {
+        await options.onHandleStoreAdd?.(invocation)
         /** @type {import('@web3-storage/access').StoreAddSuccessDone} */
         const success = {
           status: 'done',
@@ -204,7 +207,135 @@ test('uploadsNdJson | migrate-to-w3up --space <space.did>', async () => {
  * if one upload errors, the migration should be able to keep going, but keep a record of the failure.
  * after the migration run (with errors logged), the log of uploads that couldn't be migrated is effectively a new migration source.
  */
-// todo
+test('migrate-to-w3up logs errors', async () => {
+  const defaultCarFinderCarSize = 100
+  const carFinder = createServer(createCarFinder({
+    headers(req) { return { 'content-length': String(defaultCarFinderCarSize) } }
+  }))
+  // mock w3up will error on first store/add but succeed after
+  let didErrorOnFirstStoreAdd = false
+  const w3up = createServer(await createMockW3up({
+    async onHandleStoreAdd(invocation) {
+      if (didErrorOnFirstStoreAdd) {
+        return
+      }
+      didErrorOnFirstStoreAdd = true
+      throw new Error('fake error on first store/add')
+    }
+  }))
+  /**
+   * test with running mock servers
+   * @param {URL} carFinderUrl - url to mock w3s.link gateway, where migration will find cars
+   * @param {URL} w3upUrl - url to mock w3up ucanto http endpoint
+   */
+  async function testMigration(
+    carFinderUrl,
+    w3upUrl,
+  ) {
+    const uploadLimit = 3
+    let uploadsRemaining = uploadLimit
+    const uploads = new ReadableStream({
+      async pull(controller) {
+        if (uploadsRemaining <= 0) {
+          controller.close()
+          return;
+        }
+        const text = JSON.stringify(exampleUpload1) + '\n'
+        const bytes = new TextEncoder().encode(text)
+        controller.enqueue(bytes)
+        uploadsRemaining--
+      }
+    })
+
+    const spaceA = await ed25519.generate()
+    const migrationSession = await ed25519.generate()
+
+    const spaceAAuthorizesMigrationSession = await delegate({
+      issuer: spaceA,
+      audience: migrationSession,
+      capabilities: [
+        {
+          can: 'store/add',
+          with: spaceA.did(),
+        },
+        {
+          can: 'upload/add',
+          with: spaceA.did(),
+        }
+      ]
+    })
+
+    const migrationProcess = spawnMigration([
+      '--space', spaceA.did(),
+      '--ipfs', carFinderUrl.toString(), 
+      '--w3up', w3upUrl.toString(), 
+    ], {
+      ...process.env,
+      W3_PRINCIPAL: ed25519.format(migrationSession),
+      W3_PROOF: (await encodeDelegationAsCid(spaceAAuthorizesMigrationSession)).toString(),
+    })
+    await pipeline(uploads, migrationProcess.stdin)
+    const migrationProcessExit = migrationProcess.exitCode || new Promise((resolve) => migrationProcess.on('exit', () => resolve()))
+
+    const migrationEvents = []
+    migrationProcess.stdout.on('data', (chunk) => {
+      const parsed = JSON.parse(chunk.toString())
+      migrationEvents.push(parsed)
+    })
+
+    const stderrChunks = []
+    migrationProcess.stderr.on('data', (chunk) => {
+      console.warn(chunk.toString())
+      stderrChunks.push(chunk)
+    })
+
+    await migrationProcessExit
+    assert.equal(migrationProcess.exitCode, 1, 'migrationProcess.exitCode is 1 because not all uploads migrated ok')
+
+    assert.equal(migrationEvents.length, uploadLimit)
+
+    // first event should be a failure
+    const [e0, ...eventsExcludingFirst] = migrationEvents
+    assert.equal(e0.type, 'UploadMigrationFailure')
+    for (const [, partMigration] of Object.entries(e0.parts)) {
+      assert.ok('cause' in partMigration)
+      assert.match(partMigration.cause.message, /fake error on first store\/add/i)
+    }
+    assert.equal(eventsExcludingFirst.length, uploadLimit-1)
+
+    // remaining events should be success
+    for (const event of eventsExcludingFirst) {
+      assert.equal(event.type, 'UploadMigrationSuccess')
+      assert.deepEqual(event.add.receipt.out.ok, {root:{'/': event.upload.cid}})
+      for (const [partCid, partMigration] of Object.entries(event.parts)) {
+        assert.deepEqual(partMigration.add.receipt.out.ok.link, {'/': partCid})
+      }
+    }
+  }
+
+  // servers should listen
+  await Promise.all([
+    new Promise((resolve, reject) => {
+      carFinder.listen(0)
+      carFinder.on('listening', () => resolve())
+    }),
+    new Promise((resolve, reject) => {
+      w3up.listen(0)
+      w3up.on('listening', () => resolve())
+    }),
+  ])
+  // run tests with urls of running servers,
+  // and ensure servers close when done/error
+  try {
+    await testMigration(
+      locate(carFinder).url,
+      locate(w3up).url,
+    )
+  } finally {
+    carFinder.close()
+    w3up.close()
+  }
+})
 
 /**
  * spawn a migrate-to-w3up cli process

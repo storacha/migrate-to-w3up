@@ -3,7 +3,7 @@ import * as Link from 'multiformats/link'
 import { Store, Upload } from '@web3-storage/capabilities'
 import { DID } from "@ucanto/validator"
 import { Parallel } from 'parallel-transform-web'
-import { MigrateUploadFailure, MigratedUpload, MigratedUploadAllParts, MigratedUploadOnePart, UploadPartMigrationFailure } from "./w3up-migration.js";
+import { UploadMigrationFailure, UploadMigrationSuccess, MigratedUploadParts, MigratedUploadOnePart, UploadPartMigrationFailure } from "./w3up-migration.js";
 
 /**
  * migrate from w32023 to w3up.
@@ -34,7 +34,7 @@ export async function* migrate(options) {
   if (concurrency < 1) {
     throw new Error(`concurrency must be at least 1`)
   }
-  /** @type {Array<UploadPartMigrationFailure|MigrateUploadFailure<W32023Upload>>} */
+  /** @type {Array<UploadPartMigrationFailure|UploadMigrationFailure<W32023Upload>>} */
   const failures = []
   const results = source
     .pipeThrough(new TransformStream(new UploadToFetchableUploadPart({ fetchPart })))
@@ -58,7 +58,7 @@ export async function* migrate(options) {
     .pipeThrough(new TransformStream(new CollectMigratedUploadParts))
     .pipeThrough(new TransformStream({
       /**
-       * @param {MigrateUploadFailure<W32023Upload>|MigratedUploadAllParts<W32023Upload>} item - item to transform
+       * @param {UploadMigrationFailure<W32023Upload>|MigratedUploadParts<W32023Upload>} item - item to transform
        * @param {TransformStreamDefaultController} controller - stream controller
        */
       async transform(item, controller) {
@@ -262,15 +262,15 @@ const collectMigratedParts = async function* (
       return 'cause' in partMigration
     }).length
     if (partFailureCount > 0) {
-      /** @type {MigrateUploadFailure<W32023Upload>} */
-      const fail = Object.assign(new MigrateUploadFailure, {
+      /** @type {UploadMigrationFailure<W32023Upload>} */
+      const fail = Object.assign(new UploadMigrationFailure, {
         upload,
         parts: partsForUpload,
         cause: new Error(`Failed to migrate ${partFailureCount}/${upload.parts.length} upload parts`),
       })
       yield fail
     } else {
-      /** @type {MigratedUploadAllParts<W32023Upload>} */
+      /** @type {MigratedUploadParts<W32023Upload>} */
       const allparts = {
         upload,
         // @ts-expect-error we ensure this has no failures via hasPartFailure
@@ -292,7 +292,7 @@ const collectMigratedParts = async function* (
  * i.e. 'group by upload'
  * @implements {Transformer<
  *   MigratedUploadOnePart<W32023Upload>,
- *   MigratedUploadAllParts<W32023Upload>
+ *   MigratedUploadParts<W32023Upload>
  * >}
  */
 class CollectMigratedUploadParts {
@@ -423,7 +423,7 @@ async function uploadBlockForStoreAddSuccess(
 /**
  * given info about an upload with all parts migrated to w3up,
  * invoke upload/add with the part links to complete migrating the upload itself.
- * @param {MigratedUploadAllParts<W32023Upload>} upload - upload with all parts migrated to destination
+ * @param {MigratedUploadParts<W32023Upload>} upload - upload with all parts migrated to destination
  * @param {object} options - options
  * @param {import("@ucanto/client").ConnectionView} options.w3up - connection to w3up on which invocations will be sent
  * @param {import("@ucanto/client").SignerKey} options.issuer - principal that will issue w3up invocations
@@ -455,15 +455,19 @@ async function transformInvokeUploadAddForMigratedUploadParts({ upload, parts },
   const receipt = /** @type {import('@ucanto/interface').Receipt<import("@web3-storage/access").UploadAddSuccess>} */ (
     uploadAddReceipt
   )
-  return { upload, parts, add: { receipt } }
+  const success = new UploadMigrationSuccess
+  success.upload = upload
+  success.parts = parts
+  success.add = { receipt }
+  return success
 }
 
 /**
  * transform stream of info about uploads with all parts migrated to w3up,
  * into stream of info about uploads migrated via successful upload/add invocation linking to parts.
  * @implements {Transformer<
- *   MigratedUploadAllParts<W32023Upload>,
- *   MigratedUpload<W32023Upload>
+ *   MigratedUploadParts<W32023Upload>,
+ *   UploadMigrationSuccess<W32023Upload>
  * >}
  */
 class InvokeUploadAddForMigratedParts {
@@ -478,8 +482,8 @@ class InvokeUploadAddForMigratedParts {
    */
   constructor({ w3up, issuer, authorization, destination, signal }) {
     /**
-     * @param {MigratedUploadAllParts<W32023Upload>|undefined} uploadedParts - upload to transform into one output per upload.part
-     * @param {TransformStreamDefaultController<MigratedUpload<W32023Upload>>} controller - enqueue output her
+     * @param {MigratedUploadParts<W32023Upload>|undefined} uploadedParts - upload to transform into one output per upload.part
+     * @param {TransformStreamDefaultController<UploadMigrationSuccess<W32023Upload>>} controller - enqueue output her
      */
     this.transform = async function transform(uploadedParts, controller) {
       if (uploadedParts) {

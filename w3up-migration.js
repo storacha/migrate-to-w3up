@@ -6,10 +6,6 @@
  * if the receipt instructed the client to send car bytes, that already happened too
  */
 export class MigratedUploadOnePart {
-  /** @type {Upload} */
-  upload
-  /** @type {string} */
-  part
   /**
    * @type {{
    *   receipt: import('@ucanto/interface').Receipt<import("@web3-storage/access").StoreAddSuccess>
@@ -22,6 +18,10 @@ export class MigratedUploadOnePart {
    * }}
    */
   copy
+  /** @type {string} */
+  part
+  /** @type {Upload} */
+  upload
 }
 
 /**
@@ -29,14 +29,14 @@ export class MigratedUploadOnePart {
  * 
  * a single upload with all blocks migrated to w3up.
  */
-export class MigratedUploadAllParts {
-  /** @type {Upload} */
-  upload
+export class MigratedUploadParts {
   /**
    * map of part CID to migrated part block
    * @type {Map<string, MigratedUploadOnePart<Upload>>}
    */
   parts
+  /** @type {Upload} */
+  upload
 }
 
 /**
@@ -45,10 +45,7 @@ export class MigratedUploadAllParts {
  * a single upload with all blocks migrated to w3up
  * AND an upload/add receipt
  */
-export class MigratedUpload {
-  /** @type {Upload} */
-  upload
-
+export class UploadMigrationSuccess {
   /**
    * @type {{
    *  receipt: import('@ucanto/interface').Receipt<import("@web3-storage/access").UploadAddSuccess>
@@ -61,6 +58,16 @@ export class MigratedUpload {
    * @type {Map<string, MigratedUploadOnePart<Upload>>}
    */
   parts
+
+  /** @type {Upload} */
+  upload
+
+  toJSON() {
+    return {
+      type: 'UploadMigrationSuccess',
+      ...this,
+    }
+  }
 }
 
 /**
@@ -86,10 +93,7 @@ export class UploadPartMigrationFailure {
  * 
  * a single upload that could not be migrated due to an Error
  */
-export class MigrateUploadFailure {
-  /** @type {Upload} */
-  upload
-
+export class UploadMigrationFailure {
   /** @type {E} */
   cause
 
@@ -98,6 +102,16 @@ export class MigrateUploadFailure {
    * @type {Map<string, MigratedUploadOnePart<Upload>|UploadPartMigrationFailure<Upload>>}
    */
   parts
+
+  /** @type {Upload} */
+  upload
+
+  toJSON() {
+    return {
+      type: 'UploadMigrationFailure',
+      ...this,
+    }
+  }
 }
 
 /**

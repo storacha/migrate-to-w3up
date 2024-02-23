@@ -13,7 +13,7 @@ import confirm from '@inquirer/confirm';
 import { Web3Storage } from 'web3.storage'
 import promptForPassword from '@inquirer/password';
 import { carPartToStoreAddNb, migrate } from "./w32023-to-w3up.js";
-import { MigrateUploadFailure, UploadPartMigrationFailure, receiptToJson } from "./w3up-migration.js";
+import { UploadMigrationFailure, UploadMigrationSuccess, UploadPartMigrationFailure, receiptToJson } from "./w3up-migration.js";
 import * as Link from 'multiformats/link'
 import { Store } from "@web3-storage/capabilities";
 import { fromString } from 'uint8arrays'
@@ -188,7 +188,7 @@ async function main(argv) {
   let uploadMigrationSuccessCount = 0
   for await (const event of migration) {
     console.log(JSON.stringify(event, stringifyForMigrationProgressStdio, isInteractive ? 2 : undefined))
-    if (event instanceof MigrateUploadFailure) {
+    if (event instanceof UploadMigrationFailure) {
       uploadMigrationFailureCount++
     } else {
       uploadMigrationSuccessCount++
@@ -256,22 +256,15 @@ function stringifyForMigrationProgressStdio(key, value) {
   if (value instanceof Map) {
     return Object.fromEntries(value.entries())
   }
-  if (value instanceof UploadPartMigrationFailure) {
-    return {
-      type: 'PartMigrationFailure',
-      ...value,
-      upload: new W32023UploadSummary(value.upload),
-      cause: (typeof value.cause?.toJSON === 'function') ? value.cause.toJSON() : {
-        ...value.cause,
-        name: value.cause.name,
-        message: value.cause.message,
-        stack: value.cause.stack,
-        cause: value.cause.cause,
-      }
-    }
-  }
   if (value instanceof W32023Upload) {
     return (new W32023UploadSummary(value)).toJSON()
+  }
+  if ((value instanceof Error) && (!('toJSON' in value) || typeof value.toJSON !== 'function')) {
+    return {
+      name: value.name,
+      message: value.message,
+      cause: value.cause,
+    }
   }
   return value
 }

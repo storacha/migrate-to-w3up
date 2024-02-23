@@ -9,7 +9,7 @@ import { migrate } from './w32023-to-w3up.js'
 import { createServer } from 'http'
 import { MapCidToPromiseResolvers } from './utils.js'
 import { ReadableStream, TransformStream } from 'stream/web'
-import { MigrateUploadFailure, UploadPartMigrationFailure } from './w3up-migration.js'
+import { UploadMigrationFailure, UploadPartMigrationFailure } from './w3up-migration.js'
 import { createCarFinder, locate } from './test-utils.js'
 
 /** example uploads from `w3 list --json` */
@@ -385,7 +385,7 @@ await test('can migrate in a way that throws when encountering status=upload', a
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     for await (const event of migration) {
       migrationEventCount++
-      if (event instanceof MigrateUploadFailure) {
+      if (event instanceof UploadMigrationFailure) {
         failures.push(event)
         break;
       }
@@ -483,7 +483,7 @@ await test('can migrate tolerating store/add invocation errors', async () => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     for await (const event of migration) {
       migrationEventCount++
-      if (event instanceof MigrateUploadFailure) {
+      if (event instanceof UploadMigrationFailure) {
         failures.push(event)
       }
     }
