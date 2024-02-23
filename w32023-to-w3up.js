@@ -449,7 +449,7 @@ async function transformInvokeUploadAddForMigratedUploadParts({ upload, parts },
     w3up,
   )
   if (!uploadAddReceipt.out.ok) {
-    console.log('uploadAddReceipt.out', uploadAddReceipt.out)
+    console.warn('uploadAddReceipt.out', uploadAddReceipt.out)
     throw new Error(`upload/add failure`)
   }
   const receipt = /** @type {import('@ucanto/interface').Receipt<import("@web3-storage/access").UploadAddSuccess>} */ (

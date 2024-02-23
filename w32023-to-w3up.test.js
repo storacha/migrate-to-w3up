@@ -6,10 +6,11 @@ import * as Client from '@ucanto/client'
 import * as ed25519 from '@ucanto/principal/ed25519'
 import * as Server from "@ucanto/server"
 import { migrate } from './w32023-to-w3up.js'
-import { IncomingMessage, createServer } from 'http'
+import { createServer } from 'http'
 import { MapCidToPromiseResolvers } from './utils.js'
 import { ReadableStream, TransformStream } from 'stream/web'
 import { MigrateUploadFailure, UploadPartMigrationFailure } from './w3up-migration.js'
+import { createCarFinder, locate } from './test-utils.js'
 
 /** example uploads from `w3 list --json` */
 const uploadsNdjson = `\
@@ -157,8 +158,8 @@ await test('migration sends car bytes when store/add result says to', async () =
   carFinder.listen(0)
   carReceiver.listen(0)
   try {
-    const {url: carFinderUrl} = await locate(carFinder)
-    const {url: carReceiverUrl} = await locate(carReceiver)
+    const {url: carFinderUrl} = locate(carFinder)
+    const {url: carReceiverUrl} = locate(carReceiver)
     await testMigration(carFinderUrl, carReceiverUrl)
   } finally {
     carFinder.close()
@@ -192,7 +193,7 @@ await test('can migrate with mock servers and concurrency', async () => {
   carFinder.listen(0)
 
   try {
-    const { url } = await locate(carFinder)
+    const { url } = locate(carFinder)
     const concurrency = 3
 
     const space = await ed25519.generate()
@@ -333,7 +334,7 @@ await test('can migrate in a way that throws when encountering status=upload', a
    * test with a running carFinder service.
    */
   async function testCanMigrateWithNoCopy() {
-    const { url } = await locate(carFinder)
+    const { url } = locate(carFinder)
     const space = await ed25519.generate()
     const issuer = space
     const connection = Client.connect({
@@ -422,7 +423,7 @@ await test('can migrate tolerating store/add invocation errors', async () => {
   carFinder.listen(0)
   await new Promise((resolve) => carFinder.addListener('listening', () => resolve()))
   try {
-    await testCanMigrateToleratingErrors((await locate(carFinder)).url)
+    await testCanMigrateToleratingErrors((locate(carFinder)).url)
   } finally {
     carFinder.close()
   }
@@ -500,39 +501,6 @@ await test('can migrate tolerating store/add invocation errors', async () => {
 })
 
 /**
- * @param {object} options - options
- * @param {(request: IncomingMessage) => string|undefined} [options.cid] - given request, return a relevant CAR CID to find
- * @param {(request: IncomingMessage) => Record<string,string>} options.headers - given a request, return map that should be used for http response headers, e.g. to add a content-length header like w3s.link does.
- * @param {(request: IncomingMessage) => Promise<any>} [options.waitToRespond] - if provided, this can return a promise that can defer responding
- * @returns {import('http').RequestListener} request listener that mocks w3s.link
- */
-function createCarFinder(options) {
-  return (req, res) => {
-    (options.waitToRespond?.(req) ?? Promise.resolve()).then(() => {
-      const getCid = options.cid ?? function (req) {
-        const lastPathSegmentMatch = req.url.match(/\/([^/]+)$/)
-        const cid = lastPathSegmentMatch && lastPathSegmentMatch[1]
-        return cid
-      }
-      const cid = getCid(req)
-      if (!cid) {
-        res.writeHead(404)
-        res.end('cant determine cid');
-        return;
-      }
-      const headers = options.headers(req) ?? {}
-      if (!Object.keys(headers).find(h => h.match(/content-length/i))) {
-        throw new Error('carFinder response headers must include content-length')
-      }
-      res.writeHead(200, {
-        ...headers
-      })
-      res.end()
-    })
-  }
-}
-
-/**
  * create an infinite stream of uploads
  * @param {object} [options] options
  * @param {number} [options.limit] max upload to emit before closing stream
@@ -553,17 +521,6 @@ function createEndlessUploads({ limit = Infinity }={}) {
     }
   })
   return { get pulledCount() { return pulledCount }, readable }
-}
-
-/**
- * @param {import('http').Server} server - server that should be listening on the returned url
- */
-async function locate(server) {
-  const address = server.address()
-  if (typeof address === 'string') throw new Error(`unexpected address string`)
-  const { port } = address
-  const url = new URL(`http://localhost:${port}/`)
-  return { url }
 }
 
 /**
