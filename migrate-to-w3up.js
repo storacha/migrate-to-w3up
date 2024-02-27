@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { W32023Upload, W32023UploadSummary, W32023UploadsFromNdjson } from "./w32023.js";
 import { fileURLToPath } from 'url'
-import fs from 'fs'
+import fs, { createWriteStream } from 'fs'
 import { Readable } from 'node:stream'
 import * as w3up from "@web3-storage/w3up-client"
 import { parseArgs } from 'node:util'
@@ -24,6 +24,7 @@ import { StoreMemory } from "@web3-storage/access/stores/store-memory";
 import * as ed25519Principal from '@ucanto/principal/ed25519'
 import { parseW3Proof } from "./w3-env.js";
 import inquirer from 'inquirer';
+import { Console } from "console";
 
 // if this file is being executed directly, run main() function
 const isMain = (url, argv = process.argv) => fileURLToPath(url) === fs.realpathSync(argv[1])
@@ -119,6 +120,10 @@ async function main(argv) {
         help: 'URL of w3up API to connect to',
         default: 'https://up.web3.storage',
       },
+      log: {
+        type: 'string',
+        help: 'path to file to log migration events to',
+      }
     },
   })
 
@@ -158,6 +163,9 @@ async function main(argv) {
     throw new Error(`Unable to determine migration destination. Will not migrate.`)
   }
   const space = DID.match({ method: 'key' }).from(spaceValue)
+
+  // write ndjson events here
+  const ndJsonLog = values.log ? createWriteStream(values.log) : undefined
 
   const migration = migrate({
     concurrency: 4,
@@ -213,6 +221,9 @@ async function main(argv) {
       else {
         // stdout
         console.log(JSON.stringify(event, stringifyForMigrationProgressStdio, isInteractive ? 2 : undefined))
+      }
+      if (ndJsonLog) {
+        ndJsonLog.write(JSON.stringify(event, stringifyForMigrationProgressStdio))
       }
       uploadMigrationSuccessCount++
     }

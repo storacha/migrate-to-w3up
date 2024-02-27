@@ -60,7 +60,7 @@ test('uploadsNdJson | migrate-to-w3up --space <space.did>', async () => {
 
     const migrationProcess = spawnMigration([
       '--space', spaceA.did(),
-      '--ipfs', carFinderUrl.toString(), 
+      '--ipfs', carFinderUrl.toString(),
       '--w3up', w3upUrl.toString(), 
     ], {
       ...process.env,

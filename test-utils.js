@@ -6,6 +6,54 @@ import { Store, Upload } from '@web3-storage/capabilities'
 import * as consumers from 'stream/consumers'
 import * as CAR from '@ucanto/transport/car'
 import * as ed25519 from '@ucanto/principal/ed25519'
+import { exampleUpload1 } from './w32023.js'
+import { ReadableStream } from 'node:stream/web'
+import { delegate } from '@ucanto/core'
+
+/**
+ * set up a simple set of objects for testing migration
+ */
+export async function setupSpaceMigrationScenario() {
+  const spaceA = await ed25519.generate()
+  const migrator = await ed25519.generate()
+  const migratorCanAddToSpace = await delegate({
+    issuer: spaceA,
+    audience: migrator,
+    capabilities: [
+      {
+        can: 'store/add',
+        with: spaceA.did(),
+      },
+      {
+        can: 'upload/add',
+        with: spaceA.did(),
+      }
+    ]
+  })
+  return { space: spaceA, migrator, migratorCanAddToSpace }
+}
+
+/**
+ * create a ReadableStream of uploads to migrate
+ * @param {object} [options] - options
+ * @param {number} [options.limit] - stop after this many uploads are read
+ */
+export function createUploadsStream({ limit = Infinity }={}) {
+  let uploadsRemaining = limit
+  const uploads = new ReadableStream({
+    async pull(controller) {
+      if (uploadsRemaining <= 0) {
+        controller.close()
+        return;
+      }
+      const text = JSON.stringify(exampleUpload1) + '\n'
+      const bytes = new TextEncoder().encode(text)
+      controller.enqueue(bytes)
+      uploadsRemaining--
+    }
+  })  
+  return uploads
+}
 
 /**
  * @param {object} options - options
