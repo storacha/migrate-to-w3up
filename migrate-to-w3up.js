@@ -285,9 +285,6 @@ async function migratePartCli(spaceDid, args) {
  * @param {any} value - json property value
  */
 function stringifyForMigrationProgressStdio(key, value) {
-  if (key === 'receipt' && value) {
-    return receiptToJson(value)
-  }
   if (value instanceof Map) {
     return Object.fromEntries(value.entries())
   }

@@ -29,15 +29,15 @@ async function getTmpLogFilePath() {
 
 await test('running migrate-to-w3up cli with a log file logs to the file passed as --log', async t => {
   // we'll migrate three uploads
-  const uploads = createUploadsStream({ limit: 3 })
+  const uploads = createUploadsStream({ limit: 4 })
   // set things up so the first store/add invocation errors,
   // but all subsequent store/add invocations dont error.
-  // also the first upload/add invocation will succeed,
-  // but all subsequent ones will error.
-  // For the three migrated uploads, we then expect:
+  // also the second upload/add invocation will error (and rest succeed).
+  // For the migrated uploads, we then expect:
   // 1. will fail due to underlying store/add error of upload part
   // 2. will succeed (store/add succeeds after first invocation, and the upload/add will succeed since it should be the first invocation)
   // 3. will fail due to failure in upload/add invocation
+  // 4. will succeed (as would subsequent ones)
   let storeAddRequestCount = 0
   let uploadAddRequestCount = 0
   const w3upListener = createMockW3up({
@@ -52,7 +52,7 @@ await test('running migrate-to-w3up cli with a log file logs to the file passed 
     },
     async onHandleUploadAdd(invocation) {
       uploadAddRequestCount++
-      if (uploadAddRequestCount >= 2) {
+      if (uploadAddRequestCount == 2) {
         // error after first request
         throw new Error('mocked upload/add error')
       }
@@ -94,8 +94,8 @@ await test('running migrate-to-w3up cli with a log file logs to the file passed 
       'log file has at least one object in ndjson')
     assert.equal(
       eventsFromLog.filter(e => e.type === "UploadMigrationSuccess").length,
-      1,
-      'log has event of type UploadMigrationSuccess'
+      2,
+      'log has events of type UploadMigrationSuccess'
     )
     assert.equal(
       eventsFromLog.filter(e => e.type === "UploadMigrationFailure").length,
@@ -105,7 +105,8 @@ await test('running migrate-to-w3up cli with a log file logs to the file passed 
 
     assert.equal(stdoutText, "", 'there should be no stdout because we told it to write to a logfile instead')
     
-    // stderr should be ndjson
+    // stderr should be ndjson and have failures
+
     const stderrEvents = []
     for await (const e of readNDJSONStream(Readable.toWeb(Readable.from([new TextEncoder().encode(stderrText)])))) {
       stderrEvents.push(e)
@@ -118,6 +119,8 @@ await test('running migrate-to-w3up cli with a log file logs to the file passed 
           throw new Error(`unexpected stderr event type ${e.type}`)
       }
     }
+    assert.equal(stderrEvents.length, 2)
+    assert.equal(stderrEvents.filter(e => e.type === 'UploadMigrationFailure').length, 2)
   }
   try { await run() }
   finally { close(); }

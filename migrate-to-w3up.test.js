@@ -219,9 +219,8 @@ test('migrate-to-w3up logs errors', async () => {
     const stderrChunks = []
     migrationProcess.stderr.on('data', (chunk) => {
       // console.warn('stderr:', chunk.toString())
-      try { migrationEvents.push(JSON.parse(chunk.toString()))} catch {
-        console.warn('error parsing stderr as JSON', chunk.toString())
-      }
+      // eslint-disable-next-line no-empty
+      try { migrationEvents.push(JSON.parse(chunk.toString()))} catch {}
       stderrChunks.push(chunk)
     })
 
