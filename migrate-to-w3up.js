@@ -222,9 +222,6 @@ async function main(argv) {
       const consoleLink = `https://console.web3.storage/space/${space}/root/${root}`
       if (ui) {
         ui?.log.write(consoleLink)
-      } else if (!ndJsonLog) {
-        // if no ui, and no explicit logfile, log to stdout
-        console.log(JSON.stringify(event, stringifyForMigrationProgressStdio, isInteractive ? 2 : undefined))
       }
     }
     ui?.updateBottomBar(getProgressMessage())
@@ -232,6 +229,8 @@ async function main(argv) {
   if (uploadMigrationFailureCount) {
     console.warn(`failed to migrate ${uploadMigrationFailureCount}/${uploadMigrationSuccessCount+uploadMigrationFailureCount} uploads`)
     process.exit(1)
+  } else {
+    console.warn(`migrated ${uploadMigrationSuccessCount+uploadMigrationFailureCount} uploads`)
   }
 }
 

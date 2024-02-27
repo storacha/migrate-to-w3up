@@ -170,6 +170,58 @@ await test('running migrate-to-w3up cli with a log file logs to the file passed 
   finally { close(); }
 })
 
+
+await test('migrate-to-w3up logs to stderr if no --log passed', async t => {
+  const uploads = createUploadsStream({ limit: 2 })
+  let uploadAddRequestIndex = 0
+  const w3upListener = createMockW3up({
+    async onHandleUploadAdd() {
+      try {
+        if (uploadAddRequestIndex % 2 === 0) throw new Error('mock upload/add failure on even request indexes')
+      } finally { uploadAddRequestIndex++ }
+    }
+  })
+  const { carFinder, w3up, close } = await setupMockW3upServices(w3upListener)
+  const { space, migrator, migratorCanAddToSpace } = await setupSpaceMigrationScenario()
+  // run test but dont worry about server cleanup
+  const run = async () => {
+    const migrationProcess = spawnMigration([
+      '--space', space.did(),
+      '--ipfs', carFinder.toString(),
+      '--w3up', w3up.toString(),
+    ], {
+      ...process.env,
+      W3_PRINCIPAL: ed25519.format(migrator),
+      W3_PROOF: (await encodeDelegationAsCid(migratorCanAddToSpace)).toString(),
+    })
+    await pipeline(uploads, migrationProcess.stdin)
+    const migrationProcessExit = migrationProcess.exitCode || new Promise((resolve) => migrationProcess.on('exit', () => resolve()))
+    let stdoutText
+    let stderrText
+    await Promise.all([
+      migrationProcessExit,
+      Promise.resolve().then(async () => {
+        stdoutText = await text(migrationProcess.stdout) }),
+      Promise.resolve().then(async () => {
+        stderrText = await text(migrationProcess.stderr) }),
+    ])
+    assert.ok(!stdoutText, 'no stdout')
+
+    // stderr should have some ndjson events
+    const stderrEvents = []
+    for await (const event of readNDJSONStream(Readable.toWeb(Readable.from([new TextEncoder().encode(stderrText)])))) {
+      stderrEvents.push(event)
+    }
+    assert.equal(stderrEvents.filter(e => e.type === 'UploadMigrationFailure').length, 1, 'stderr ndjson has UploadMigrationFailure event')
+
+    const stderrLines = (stderrText || '').split('\n').filter(m => m.trim())
+    const stderrLastLine = stderrLines[stderrLines.length - 1]
+    assert.match(stderrLastLine, /failed to migrate 1\/2 uploads/)
+  }
+  try { await run() }
+  finally { close(); }
+})
+
 /**
  * set up mock http servers that migration depends on: w3up and 'carFinder' e.g. w3s.link gateway
  * @param {Promise<import('node:http').RequestListener>} w3upListener - mock w3up http request listener
