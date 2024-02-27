@@ -1,3 +1,6 @@
+import readNDJSONStream from 'ndjson-readablestream'
+import { ReadableStream } from 'node:stream/web'
+
 /**
  * @template {{ cid: string }} Upload
  * 
@@ -200,4 +203,21 @@ function invocationToJson(i) {
     signature: i.signature,
     expiration: i.expiration,
   }
+}
+
+/**
+ * @param {ReadableStream} readable - readable stream of ndjson migration events
+ * @returns {ReadableStream} - uploads extracted from UploadMigrationFailures in readable
+ */
+export function readUploadsFromUploadMigrationFailuresNdjson(readable) {
+  return new ReadableStream({
+    async start(controller) {
+      for await (const event of readNDJSONStream(readable)) {
+        if (event?.type === 'UploadMigrationFailure') {
+          controller.enqueue(JSON.stringify(event.upload) + '\n')
+        }
+      }
+      controller.close()
+    }
+  })
 }

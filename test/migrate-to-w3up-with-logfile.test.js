@@ -19,6 +19,7 @@ import * as fs from "fs/promises"
 import { tmpdir } from 'node:os'
 import readNDJSONStream from 'ndjson-readablestream'
 import { Readable } from 'node:stream'
+import { readUploadsFromUploadMigrationFailuresNdjson } from '../w3up-migration.js'
 
 /** make a temporary file path that can be used for test migration logfiles  */
 async function getTmpLogFilePath() {
@@ -106,7 +107,6 @@ await test('running migrate-to-w3up cli with a log file logs to the file passed 
     assert.equal(stdoutText, "", 'there should be no stdout because we told it to write to a logfile instead')
     
     // stderr should be ndjson and have failures
-
     const stderrEvents = []
     for await (const e of readNDJSONStream(Readable.toWeb(Readable.from([new TextEncoder().encode(stderrText)])))) {
       stderrEvents.push(e)
@@ -121,6 +121,50 @@ await test('running migrate-to-w3up cli with a log file logs to the file passed 
     }
     assert.equal(stderrEvents.length, 2)
     assert.equal(stderrEvents.filter(e => e.type === 'UploadMigrationFailure').length, 2)
+
+    // ok the first migration run ran as expected.
+    // now let's verify we can use the logfile as a source of uploads (from UploadMigrationFailure events)
+    // and do a second migration run
+    const uploadsFromFailures = []
+    for await (const u of readUploadsFromUploadMigrationFailuresNdjson(Readable.toWeb(createReadStream(tmpLogFilePath)))) {
+      uploadsFromFailures.push(u)
+    }
+    assert.equal(uploadsFromFailures.length, 2)
+
+    // actually run second migration process
+    // with source equal to uploads extracted from UploadMigrationFailures in the previous log
+    const tmpLogFilePath2 = await getTmpLogFilePath()
+    const migrationProcess2 = spawnMigration([
+      '--space', space.did(),
+      '--ipfs', carFinder.toString(),
+      '--w3up', w3up.toString(),
+      '--log', tmpLogFilePath2,
+    ], {
+      ...process.env,
+      W3_PRINCIPAL: ed25519.format(migrator),
+      W3_PROOF: (await encodeDelegationAsCid(migratorCanAddToSpace)).toString(),
+    })
+    await pipeline(
+      readUploadsFromUploadMigrationFailuresNdjson(Readable.toWeb(createReadStream(tmpLogFilePath))),
+      migrationProcess2.stdin)
+    const migrationProcess2Exit = migrationProcess2.exitCode || new Promise((resolve) => migrationProcess2.on('exit', () => resolve()))
+    await migrationProcess2Exit
+    assert.equal(migrationProcess2.exitCode, 0)
+
+    // ok let's inspect that log file and expect successful migration events
+    // for the uploads that had failed to migrate before
+    const eventsFromLog2 = []
+    for await (const event of readNDJSONStream(Readable.toWeb(createReadStream(tmpLogFilePath2)))) {
+      eventsFromLog2.push(event)
+      switch (event.type) {
+        case "UploadMigrationSuccess":
+          // expected
+          break;
+        default:
+          throw new Error(`unexpected migration event in log of type ${event.type}`, { cause: event })
+      }
+    }
+    assert.equal(eventsFromLog2.length, 2)
   }
   try { await run() }
   finally { close(); }
