@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { W32023Upload, W32023UploadSummary, W32023UploadsFromNdjson } from "./w32023.js";
 import { fileURLToPath } from 'url'
-import fs, { createWriteStream } from 'fs'
+import fs, { createReadStream, createWriteStream } from 'fs'
 import { Readable } from 'node:stream'
 import * as w3up from "@web3-storage/w3up-client"
 import { parseArgs } from 'node:util'
@@ -24,6 +24,7 @@ import { StoreMemory } from "@web3-storage/access/stores/store-memory";
 import * as ed25519Principal from '@ucanto/principal/ed25519'
 import { parseW3Proof } from "./w3-env.js";
 import inquirer from 'inquirer';
+import readNDJSONStream from 'ndjson-readablestream'
 
 // if this file is being executed directly, run main() function
 const isMain = (url, argv = process.argv) => fileURLToPath(url) === fs.realpathSync(argv[1])
@@ -90,6 +91,11 @@ async function getDefaultW3upAgent(w3upUrl) {
  */
 async function main(argv) {
   const args = argv.slice(2)
+
+  // log command explores migration logfile
+  if (args[0] === 'log') {
+    return await migrationLogCli(...args.slice(1))
+  }
 
   // <space.did> store/add --link {cid}
   if ('store/add' === args[1]) {
@@ -167,7 +173,6 @@ async function main(argv) {
   const ndJsonLog = values.log ? createWriteStream(values.log) : undefined
 
   const migration = migrate({
-    concurrency: 4,
     issuer: agent.issuer,
     w3up: agent.connection,
     source: Readable.toWeb(Readable.from(source)),
@@ -382,4 +387,31 @@ const stringToCarCid = key => {
     errParseBase32 = error
     throw error
   }
+}
+
+/**
+ * cli for `migrate-to-w3up log ` ...
+ * `migrate-to-w3up log uploads-from-failures` should extract uploads from UploadMigrationFailure events in the log
+ *   and log them to stdout.
+ * @param {string[]} args
+ */
+async function migrationLogCli(...args) {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+  })
+  const command = positionals[0]
+  switch (command) {
+    case 'get-uploads-from-failures': {
+      const logfile = positionals[1]
+      if ( ! logfile) throw new Error(`provide a logfile path as larg arg`)
+      for await (const event of readNDJSONStream(Readable.toWeb(createReadStream(logfile)))) {
+        if (event.type === 'UploadMigrationFailure' && event.upload) {
+          console.log(JSON.stringify(event.upload, stringifyForMigrationProgressStdio))
+        }
+      }
+      return
+    }
+  }
+  throw new Error(`unknown log subcommand: ${command}. Try 'get-uploads-from-failures'`)
 }

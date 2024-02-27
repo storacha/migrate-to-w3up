@@ -64,6 +64,23 @@ migrate-to-w3up --space="$space" \
 w32023-export | migrate-to-w3up --space="$space" | jq
 ```
 
+### migrate w/ log
+
+`migrate-to-w3up --log /tmp/migrate-to-w3up.$(date +%s).log` will run the migration and write migration events to the provided logfile.
+This includes `UploadMigrationSuccess` and `UploadMigrationFailure` events. The latter are logged along with the source upload that could not be migrated, and this allows the log file to serve as a source of uploads to be migrated in a second migration run to retry any failures.
+
+```shell
+# set this to a space did
+space=$W3_SPACE
+migration_start="$(date +%s)"
+migration_log="/tmp/migrate-to-w3up.$migration_start.log"
+migrate-to-w3up --log "$migration_log" --space "$space"
+# wait quite some time
+migration2_log="/tmp/migrate-to-w3up.$migration_start.log"
+# retry migrating any uploads from UploadMigrationFailure
+migrate-to-w3up log get-uploads-from-failures "$migration2_log" | migrate-to-w3up --space "$space"
+```
+
 ### migrate a single CAR part
 
 Runs a single `store/add` invocation with the provided CAR link and show the output (this is mostly for w3up debuggers).
