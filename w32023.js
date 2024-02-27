@@ -80,6 +80,9 @@ export class W32023UploadSummary {
   /** @type {W32023Upload} */
   #upload;
   constructor(upload) {
+    if ( ! upload) {
+      throw new Error(`unexpected falsy upload`)
+    }
     this.#upload = upload
   }
   toJSON() {

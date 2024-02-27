@@ -1,4 +1,11 @@
 import { IncomingMessage } from 'http'
+import { fileURLToPath } from 'node:url'
+import { spawn } from 'node:child_process'
+import * as Server from '@ucanto/server'
+import { Store, Upload } from '@web3-storage/capabilities'
+import * as consumers from 'stream/consumers'
+import * as CAR from '@ucanto/transport/car'
+import * as ed25519 from '@ucanto/principal/ed25519'
 
 /**
  * @param {object} options - options
@@ -42,4 +49,85 @@ export function locate(server) {
   const { port } = address
   const url = new URL(`http://localhost:${port}/`)
   return { url }
+}
+
+
+export const migrateToW3upPath = fileURLToPath(new URL('./migrate-to-w3up.js', import.meta.url))
+
+/**
+ * create a RequestListener that can be a mock up.web3.storage
+ * @param {object} [options] - options
+ * @param {(invocation: import('@ucanto/server').ProviderInput<import('@ucanto/client').InferInvokedCapability<typeof Store.add>>) => Promise<void>} [options.onHandleStoreAdd] - store/add handler
+ */
+export async function createMockW3up(options={}) {
+  const service = {
+    store: {
+      add: Server.provide(Store.add, async (invocation) => {
+        await options.onHandleStoreAdd?.(invocation)
+        /** @type {import('@web3-storage/access').StoreAddSuccessDone} */
+        const success = {
+          status: 'done',
+          allocated: invocation.capability.nb.size,
+          link: invocation.capability.nb.link,
+          with: invocation.capability.with,
+        }
+        return {
+          ok: success,
+        }
+      })
+    },
+    upload: {
+      add: Server.provide(Upload.add, async (invocation) => {
+        /** @type {import('@web3-storage/access').UploadAddSuccess} */
+        const success = {
+          root: invocation.capability.nb.root
+        }
+        return {
+          ok: success,
+        }
+      })
+    }
+  }
+  const serverId = (await ed25519.generate()).withDID('did:web:web3.storage')
+  const server = Server.create({
+    id: serverId,
+    service,
+    codec: CAR.inbound,
+    validateAuthorization: () => ({ ok: {} }),
+  })
+  /** @type {import('node:http').RequestListener} */
+  const listener = async (req, res) => {
+    try {
+      const requestBody = new Uint8Array(await consumers.arrayBuffer(req))
+      const response = await server.request({
+        body: requestBody,
+        // @ts-expect-error slight mismatch. ignore like w3infra does
+        headers: req.headers,
+      })
+      res.writeHead(200, response.headers)
+      res.write(response.body)
+    } catch (error) {
+      console.error('error in mock w3up', error)
+      res.writeHead(500)
+      res.write(JSON.stringify(error))
+    } finally {
+      res.end()
+    }
+  }
+  return listener
+}
+
+/**
+ * spawn a migrate-to-w3up cli process
+ * @param {string[]} args - cli args
+ * @param {Record<string,string>} env - env vars
+ */
+export function spawnMigration(args, env=process.env) {
+  const proc = spawn(migrateToW3upPath, args, {
+    env,
+  })
+  proc.on('error', (error) => {
+    console.error('migration process error event', error)
+  })
+  return proc
 }

@@ -1,6 +1,4 @@
 import { test } from 'node:test'
-import { spawn } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
 import assert from 'node:assert'
 import { exampleUpload1 } from './w32023.js'
 import * as ed25519 from '@ucanto/principal/ed25519'
@@ -8,77 +6,9 @@ import { ReadableStream } from 'node:stream/web'
 import { pipeline } from 'node:stream/promises'
 import { createCarFinder, locate } from './test-utils.js'
 import { createServer } from 'node:http'
-import * as Server from '@ucanto/server'
-import { Store, Upload } from '@web3-storage/capabilities'
-import * as consumers from 'stream/consumers'
-import * as CAR from '@ucanto/transport/car'
 import { delegate } from '@ucanto/core'
 import { encodeDelegationAsCid } from './w3-env.js'
-
-const migrateToW3upPath = fileURLToPath(new URL('./migrate-to-w3up.js', import.meta.url))
-
-/**
- * create a RequestListener that can be a mock up.web3.storage
- * @param {object} [options] - options
- * @param {(invocation: import('@ucanto/server').ProviderInput<import('@ucanto/client').InferInvokedCapability<typeof Store.add>>) => Promise<void>} [options.onHandleStoreAdd] - store/add handler
- */
-async function createMockW3up(options={}) {
-  const service = {
-    store: {
-      add: Server.provide(Store.add, async (invocation) => {
-        await options.onHandleStoreAdd?.(invocation)
-        /** @type {import('@web3-storage/access').StoreAddSuccessDone} */
-        const success = {
-          status: 'done',
-          allocated: invocation.capability.nb.size,
-          link: invocation.capability.nb.link,
-          with: invocation.capability.with,
-        }
-        return {
-          ok: success,
-        }
-      })
-    },
-    upload: {
-      add: Server.provide(Upload.add, async (invocation) => {
-        /** @type {import('@web3-storage/access').UploadAddSuccess} */
-        const success = {
-          root: invocation.capability.nb.root
-        }
-        return {
-          ok: success,
-        }
-      })
-    }
-  }
-  const serverId = (await ed25519.generate()).withDID('did:web:web3.storage')
-  const server = Server.create({
-    id: serverId,
-    service,
-    codec: CAR.inbound,
-    validateAuthorization: () => ({ ok: {} }),
-  })
-  /** @type {import('node:http').RequestListener} */
-  const listener = async (req, res) => {
-    try {
-      const requestBody = new Uint8Array(await consumers.arrayBuffer(req))
-      const response = await server.request({
-        body: requestBody,
-        // @ts-expect-error slight mismatch. ignore like w3infra does
-        headers: req.headers,
-      })
-      res.writeHead(200, response.headers)
-      res.write(response.body)
-    } catch (error) {
-      console.error('error in mock w3up', error)
-      res.writeHead(500)
-      res.write(JSON.stringify(error))
-    } finally {
-      res.end()
-    }
-  }
-  return listener
-}
+import { createMockW3up, spawnMigration } from "./test-utils.js"
 
 test('uploadsNdJson | migrate-to-w3up --space <space.did>', async () => {
   const defaultCarFinderCarSize = 100
@@ -140,15 +70,17 @@ test('uploadsNdJson | migrate-to-w3up --space <space.did>', async () => {
     await pipeline(uploads, migrationProcess.stdin)
     const migrationProcessExit = migrationProcess.exitCode || new Promise((resolve) => migrationProcess.on('exit', () => resolve()))
 
+    const stdoutChunks = []
     const migrationEvents = []
     migrationProcess.stdout.on('data', (chunk) => {
-      const parsed = JSON.parse(chunk.toString())
-      migrationEvents.push(parsed)
+      // console.warn('stdout', chunk.toString())
+      try { migrationEvents.push(JSON.parse(chunk.toString()))} catch (error) { /** pass */ }
+      stdoutChunks.push(chunk)
     })
 
     const stderrChunks = []
     migrationProcess.stderr.on('data', (chunk) => {
-      console.warn(chunk.toString())
+      // console.warn('stderr', chunk.toString())
       stderrChunks.push(chunk)
     })
 
@@ -279,13 +211,17 @@ test('migrate-to-w3up logs errors', async () => {
 
     const migrationEvents = []
     migrationProcess.stdout.on('data', (chunk) => {
+      // console.warn('stdout:', chunk.toString())
       const parsed = JSON.parse(chunk.toString())
       migrationEvents.push(parsed)
     })
 
     const stderrChunks = []
     migrationProcess.stderr.on('data', (chunk) => {
-      console.warn(chunk.toString())
+      // console.warn('stderr:', chunk.toString())
+      try { migrationEvents.push(JSON.parse(chunk.toString()))} catch {
+        console.warn('error parsing stderr as JSON', chunk.toString())
+      }
       stderrChunks.push(chunk)
     })
 
@@ -301,7 +237,7 @@ test('migrate-to-w3up logs errors', async () => {
       assert.ok('cause' in partMigration)
       assert.match(partMigration.cause.message, /fake error on first store\/add/i)
     }
-    assert.equal(eventsExcludingFirst.length, uploadLimit-1)
+    assert.equal(eventsExcludingFirst.length, uploadLimit-1) // -1 to exclude first.
 
     // remaining events should be success
     for (const event of eventsExcludingFirst) {
@@ -337,17 +273,3 @@ test('migrate-to-w3up logs errors', async () => {
   }
 })
 
-/**
- * spawn a migrate-to-w3up cli process
- * @param {string[]} args - cli args
- * @param {Record<string,string>} env - env vars
- */
-function spawnMigration(args, env=process.env) {
-  const proc = spawn(migrateToW3upPath, args, {
-    env,
-  })
-  proc.on('error', (error) => {
-    console.error('migration process error event', error)
-  })
-  return proc
-}

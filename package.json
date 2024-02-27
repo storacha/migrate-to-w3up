@@ -64,6 +64,7 @@
     "@web3-storage/pail": "^0.4.0",
     "@web3-storage/w3up-client": "^12.1.0",
     "carstream": "^2.0.0",
+    "inquirer": "^9.2.15",
     "ipfs-unixfs-exporter": "^13.4.0",
     "multiformats": "^13.0.1",
     "ndjson-readablestream": "^1.1.0",

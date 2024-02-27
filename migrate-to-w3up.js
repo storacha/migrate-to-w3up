@@ -23,6 +23,7 @@ import { CAR, HTTP } from '@ucanto/transport'
 import { StoreMemory } from "@web3-storage/access/stores/store-memory";
 import * as ed25519Principal from '@ucanto/principal/ed25519'
 import { parseW3Proof } from "./w3-env.js";
+import inquirer from 'inquirer';
 
 // if this file is being executed directly, run main() function
 const isMain = (url, argv = process.argv) => fileURLToPath(url) === fs.realpathSync(argv[1])
@@ -134,11 +135,10 @@ async function main(argv) {
   // except stdin won't work if nothing is piped in.
   // If nothing piped in, ask the user what to do.
   const isInteractive = process.stdin.isTTY
-  /** @type {AsyncIterable<W32023Upload>} */
   let source = isInteractive
     ? await getUploadsFromPrompts()
     : new W32023UploadsFromNdjson(Readable.toWeb(process.stdin))
-  
+    
   let spaceValue = values.space
     // if interactive, we can use env vars and check for confirmation
     ?? (isInteractive ? (process.env.W3_SPACE ?? process.env.WEB3_SPACE) : undefined)
@@ -160,6 +160,7 @@ async function main(argv) {
   const space = DID.match({ method: 'key' }).from(spaceValue)
 
   const migration = migrate({
+    concurrency: 4,
     issuer: agent.issuer,
     w3up: agent.connection,
     source: Readable.toWeb(Readable.from(source)),
@@ -184,15 +185,38 @@ async function main(argv) {
       },
     ])
   })
+  
+  const sourceLength = 'length' in source ? await source.length : undefined
   let uploadMigrationFailureCount = 0
   let uploadMigrationSuccessCount = 0
+  const start = new Date
+  const getProgressMessage = () => {
+    const progress = `${uploadMigrationSuccessCount}/${sourceLength}`
+    const percent = (uploadMigrationSuccessCount/sourceLength)
+    const durationMs = Number(new Date) - Number(start)
+    const etaMs = durationMs / percent
+    const etaSeconds = etaMs / 1000
+    const etaMinutes = etaSeconds / 60
+    return `migrating to w3up… Uploads:${progress} ${uploadMigrationFailureCount ? `Failures:${uploadMigrationFailureCount} ` : ``}ETA:${etaMinutes.toFixed(1)}min`
+  }
+  const ui = isInteractive ? new inquirer.ui.BottomBar() : undefined
   for await (const event of migration) {
-    console.log(JSON.stringify(event, stringifyForMigrationProgressStdio, isInteractive ? 2 : undefined))
     if (event instanceof UploadMigrationFailure) {
+      // stderr
+      console.warn(JSON.stringify(event, stringifyForMigrationProgressStdio, isInteractive ? 2 : undefined))
       uploadMigrationFailureCount++
     } else {
+      const space = event.add.receipt.ran.capabilities[0].with
+      const root = event.add.receipt.ran.capabilities[0].nb.root
+      const consoleLink = `https://console.web3.storage/space/${space}/root/${root}`
+      if (ui) ui?.log.write(consoleLink)
+      else {
+        // stdout
+        console.log(JSON.stringify(event, stringifyForMigrationProgressStdio, isInteractive ? 2 : undefined))
+      }
       uploadMigrationSuccessCount++
     }
+    ui?.updateBottomBar(getProgressMessage())
   }
   if (uploadMigrationFailureCount) {
     console.warn(`failed to migrate ${uploadMigrationFailureCount}/${uploadMigrationSuccessCount+uploadMigrationFailureCount} uploads`)
@@ -294,7 +318,7 @@ async function promptForSpace(w3upUrl) {
  * get a stream of w32023 uploads via
  * interactive prompts using inquirer
  * + old web3.storage client library
- * @returns {Promise<AsyncIterable<W32023Upload>>} uploads
+ * @returns {Promise<AsyncIterable<W32023Upload> & { length: Promise<number> }>} uploads
  */
 async function getUploadsFromPrompts() {
   const confirmation = await confirm({
@@ -311,10 +335,18 @@ async function getUploadsFromPrompts() {
     })
   }
   const oldW3 = new Web3Storage({ token })
-  const uploads = oldW3.list()
-  return uploads
+  const uploads = (async function * () {
+    for await (const u of oldW3.list()) {
+      if (u) yield new W32023Upload(u)
+    }
+  }())
+  // get count
+  const userUploadsResponse = fetch(`https://api.web3.storage/user/uploads`, {
+    headers: { authorization: `Bearer ${token}`},
+  })
+  const count = userUploadsResponse.then(r => parseInt(r.headers.get('count'), 10)).then(c => isNaN(c) ? undefined : c)
+  return Object.assign(uploads, { length: count })
 }
-
 
 // multicodec codec for CAR bytes
 const CAR_CODE = 0x0202

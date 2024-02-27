@@ -18,7 +18,7 @@ import { UploadMigrationFailure, UploadMigrationSuccess, MigratedUploadParts, Mi
  * @param {number} [options.concurrency] - max concurrency for any phase of pipeline
  * @param {(part: string, options?: { signal?: AbortSignal }) => Promise<Response>} options.fetchPart - given a part CID, return the fetched response
  * @param {(receipt: import("@ucanto/interface").Receipt) => any} [options.onStoreAddReceipt] - called with each store/add invocation receipt
- * @yields {MigratedUpload<W32023Upload>}
+ * @yields {UploadMigrationSuccess<W32023Upload>}
  */
 export async function* migrate(options) {
   const {
@@ -224,7 +224,7 @@ export function carPartToStoreAddNb(options) {
  * @param {object} options - options
  * @param {AbortSignal} [options.signal] - for cancelling the migration
  * @param {Map<string, Map<string, MigratedUploadOnePart<W32023Upload>|UploadPartMigrationFailure<W32023Upload>>>} [options.uploadCidToParts] - Map<upload.cid, Map<part.cid, { response }>> - where to store state while waiting for all parts of an upload
- * @yields {MigratedUploadAllParts<W32023Upload>} upload with all parts
+ * @yields {MigratedUploadParts<W32023Upload>} upload with all parts
  */
 const collectMigratedParts = async function* (
   migratedPart,
@@ -467,7 +467,7 @@ async function transformInvokeUploadAddForMigratedUploadParts({ upload, parts },
  * into stream of info about uploads migrated via successful upload/add invocation linking to parts.
  * @implements {Transformer<
  *   MigratedUploadParts<W32023Upload>,
- *   UploadMigrationSuccess<W32023Upload>
+ *   UploadMigrationSuccess<W32023Upload>|UploadMigrationFailure<W32023Upload>
  * >}
  */
 class InvokeUploadAddForMigratedParts {
@@ -483,11 +483,20 @@ class InvokeUploadAddForMigratedParts {
   constructor({ w3up, issuer, authorization, destination, signal }) {
     /**
      * @param {MigratedUploadParts<W32023Upload>|undefined} uploadedParts - upload to transform into one output per upload.part
-     * @param {TransformStreamDefaultController<UploadMigrationSuccess<W32023Upload>>} controller - enqueue output her
+     * @param {TransformStreamDefaultController<UploadMigrationSuccess<W32023Upload>|UploadMigrationFailure<W32023Upload>>} controller - enqueue output her
      */
     this.transform = async function transform(uploadedParts, controller) {
+      controller.error
       if (uploadedParts) {
-        controller.enqueue(await InvokeUploadAddForMigratedParts.transform(uploadedParts, { w3up, issuer, authorization, destination, signal }))
+        try {
+          controller.enqueue(await InvokeUploadAddForMigratedParts.transform(uploadedParts, { w3up, issuer, authorization, destination, signal }))
+        } catch (error) {
+          const failure = new UploadMigrationFailure
+          failure.cause = error
+          failure.upload = uploadedParts.upload,
+          failure.parts = uploadedParts.parts
+          controller.enqueue(failure)
+        }
       }
     }
   }
