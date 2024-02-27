@@ -122,6 +122,32 @@ await test('running migrate-to-w3up cli with a log file logs to the file passed 
     assert.equal(stderrEvents.length, 2)
     assert.equal(stderrEvents.filter(e => e.type === 'UploadMigrationFailure').length, 2)
 
+    // let's see if we can use `migrate-to-w3up` log get-uploads-from-failures <log.path>
+    const getUploadsFromFailuresProcess = spawnMigration(['log', 'get-uploads-from-failures', tmpLogFilePath])
+    const uploadsFromFailures0 = []
+    let getUploadsFromFailuresStderr
+    await Promise.all([
+      // wait for process exit
+      new Promise((resolve) => getUploadsFromFailuresProcess.addListener('exit', () => resolve())),
+      // read stdout as ndjson
+      (async () => {
+        for await (const e of readNDJSONStream(Readable.toWeb(getUploadsFromFailuresProcess.stdout))) {
+          uploadsFromFailures0.push(e)
+        }
+      })(),
+      (async () => {
+        getUploadsFromFailuresStderr = await text(getUploadsFromFailuresProcess.stderr)
+      })(),
+    ])
+    assert.equal(getUploadsFromFailuresProcess.exitCode, 0, 'exit code is 0 (no error)')
+    assert.equal(uploadsFromFailures0.length, 2)
+    for (const upload of uploadsFromFailures0) {
+      assert.equal(typeof upload.cid, 'string')
+      assert.ok(upload.parts?.length >= 1, 'upload has parts array with at least one part')
+      for (const part of upload.parts) { assert.equal(typeof part, 'string') }
+    }
+    assert.ok(!getUploadsFromFailuresStderr, 'no stderr')
+
     // ok the first migration run ran as expected.
     // now let's verify we can use the logfile as a source of uploads (from UploadMigrationFailure events)
     // and do a second migration run
@@ -145,13 +171,13 @@ await test('running migrate-to-w3up cli with a log file logs to the file passed 
       W3_PROOF: (await encodeDelegationAsCid(migratorCanAddToSpace)).toString(),
     })
     await pipeline(
-      readUploadsFromUploadMigrationFailuresNdjson(Readable.toWeb(createReadStream(tmpLogFilePath))),
+      Readable.toWeb(spawnMigration(['log', 'get-uploads-from-failures', tmpLogFilePath]).stdout),
       migrationProcess2.stdin)
     const migrationProcess2Exit = migrationProcess2.exitCode || new Promise((resolve) => migrationProcess2.on('exit', () => resolve()))
     await migrationProcess2Exit
     assert.equal(migrationProcess2.exitCode, 0)
 
-    // ok let's inspect that log file and expect successful migration events
+    // ok let's inspect that second log file and expect successful migration events
     // for the uploads that had failed to migrate before
     const eventsFromLog2 = []
     for await (const event of readNDJSONStream(Readable.toWeb(createReadStream(tmpLogFilePath2)))) {
@@ -169,7 +195,6 @@ await test('running migrate-to-w3up cli with a log file logs to the file passed 
   try { await run() }
   finally { close(); }
 })
-
 
 await test('migrate-to-w3up logs to stderr if no --log passed', async t => {
   const uploads = createUploadsStream({ limit: 2 })

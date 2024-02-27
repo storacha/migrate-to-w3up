@@ -10,8 +10,6 @@ import { delegate } from '@ucanto/core'
 import { encodeDelegationAsCid } from './w3-env.js'
 import { createMockW3up, spawnMigration } from "./test-utils.js"
 import { text } from 'node:stream/consumers'
-import readNDJSONStream from 'ndjson-readablestream'
-import { Readable } from 'node:stream'
 
 test('uploadsNdJson | migrate-to-w3up --space <space.did>', async () => {
   const defaultCarFinderCarSize = 100
