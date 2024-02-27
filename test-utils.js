@@ -105,7 +105,8 @@ export const migrateToW3upPath = fileURLToPath(new URL('./migrate-to-w3up.js', i
 /**
  * create a RequestListener that can be a mock up.web3.storage
  * @param {object} [options] - options
- * @param {(invocation: import('@ucanto/server').ProviderInput<import('@ucanto/client').InferInvokedCapability<typeof Store.add>>) => Promise<void>} [options.onHandleStoreAdd] - store/add handler
+ * @param {(invocation: import('@ucanto/server').ProviderInput<import('@ucanto/client').InferInvokedCapability<typeof Store.add>>) => Promise<void>} [options.onHandleStoreAdd] - called at start of store/add handler
+ * @param {(invocation: import('@ucanto/server').ProviderInput<import('@ucanto/client').InferInvokedCapability<typeof Upload.add>>) => Promise<void>} [options.onHandleUploadAdd] - called at start of upload/add handler
  */
 export async function createMockW3up(options={}) {
   const service = {
@@ -126,6 +127,7 @@ export async function createMockW3up(options={}) {
     },
     upload: {
       add: Server.provide(Upload.add, async (invocation) => {
+        await options.onHandleUploadAdd?.(invocation)
         /** @type {import('@web3-storage/access').UploadAddSuccess} */
         const success = {
           root: invocation.capability.nb.root

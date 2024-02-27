@@ -24,7 +24,6 @@ import { StoreMemory } from "@web3-storage/access/stores/store-memory";
 import * as ed25519Principal from '@ucanto/principal/ed25519'
 import { parseW3Proof } from "./w3-env.js";
 import inquirer from 'inquirer';
-import { Console } from "console";
 
 // if this file is being executed directly, run main() function
 const isMain = (url, argv = process.argv) => fileURLToPath(url) === fs.realpathSync(argv[1])
@@ -209,23 +208,24 @@ async function main(argv) {
   }
   const ui = isInteractive ? new inquirer.ui.BottomBar() : undefined
   for await (const event of migration) {
+    // write ndjson to log file, if there is one
+    ndJsonLog?.write(JSON.stringify(event, stringifyForMigrationProgressStdio) + '\n')
+
     if (event instanceof UploadMigrationFailure) {
-      // stderr
-      console.warn(JSON.stringify(event, stringifyForMigrationProgressStdio, isInteractive ? 2 : undefined))
       uploadMigrationFailureCount++
+      // write failures to stderr
+      console.warn(JSON.stringify(event, stringifyForMigrationProgressStdio, isInteractive ? 2 : undefined))
     } else {
+      uploadMigrationSuccessCount++
       const space = event.add.receipt.ran.capabilities[0].with
       const root = event.add.receipt.ran.capabilities[0].nb.root
       const consoleLink = `https://console.web3.storage/space/${space}/root/${root}`
-      if (ui) ui?.log.write(consoleLink)
-      else {
-        // stdout
+      if (ui) {
+        ui?.log.write(consoleLink)
+      } else if (!ndJsonLog) {
+        // if no ui, and no explicit logfile, log to stdout
         console.log(JSON.stringify(event, stringifyForMigrationProgressStdio, isInteractive ? 2 : undefined))
       }
-      if (ndJsonLog) {
-        ndJsonLog.write(JSON.stringify(event, stringifyForMigrationProgressStdio))
-      }
-      uploadMigrationSuccessCount++
     }
     ui?.updateBottomBar(getProgressMessage())
   }
