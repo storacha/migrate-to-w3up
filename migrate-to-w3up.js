@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { W32023Upload, W32023UploadsFromNdjson } from "./w32023.js";
+import { W32023Upload, W32023UploadSummary, W32023UploadsFromNdjson } from "./w32023.js";
 import { fileURLToPath } from 'url'
-import fs from 'fs'
+import fs, { createWriteStream } from 'fs'
 import { Readable } from 'node:stream'
 import * as w3up from "@web3-storage/w3up-client"
 import { parseArgs } from 'node:util'
@@ -13,33 +13,70 @@ import confirm from '@inquirer/confirm';
 import { Web3Storage } from 'web3.storage'
 import promptForPassword from '@inquirer/password';
 import { carPartToStoreAddNb, migrate } from "./w32023-to-w3up.js";
-import { receiptToJson } from "./w3up-migration.js";
+import { UploadMigrationFailure, UploadMigrationSuccess, UploadPartMigrationFailure, receiptToJson } from "./w3up-migration.js";
 import * as Link from 'multiformats/link'
 import { Store } from "@web3-storage/capabilities";
 import { fromString } from 'uint8arrays'
 import * as Digest from 'multiformats/hashes/digest'
+import { connect } from '@ucanto/client'
+import { CAR, HTTP } from '@ucanto/transport'
+import { StoreMemory } from "@web3-storage/access/stores/store-memory";
+import * as ed25519Principal from '@ucanto/principal/ed25519'
+import { parseW3Proof } from "./w3-env.js";
+import inquirer from 'inquirer';
 
 // if this file is being executed directly, run main() function
 const isMain = (url, argv = process.argv) => fileURLToPath(url) === fs.realpathSync(argv[1])
 if (isMain(import.meta.url, process.argv)) {
-  main(process.argv).catch(error => console.error('error in main()', error))
+  await main(process.argv)
 }
 
 /**
  * get w3up-client with store from a good default store
+ * @param {URL} w3upUrl - url to w3up ucanto endpoint
  */
-async function getDefaultW3up() {
-  // instead, accept accept W3_PRINCIPAL and W3_PROOF env vars or flags 
-  const store = new StoreConf({ profile: process.env.W3_STORE_NAME ?? 'w3cli' })
-  const w3 = await w3up.create({ store })
+async function getDefaultW3up(w3upUrl) {
+  let store
+  if (process.env.W3_PRINCIPAL) {
+    store = new StoreMemory
+  } else {
+    // no W3_PRINCIPAL. Use store from w3cli that will have one
+    store = new StoreConf({ profile: process.env.W3_STORE_NAME ?? 'w3cli' })
+  }
+  const principal = process.env.W3_PRINCIPAL
+    ? ed25519Principal.parse(process.env.W3_PRINCIPAL)
+    : undefined
+
+  const connection = connect({
+    id: { did: () => 'did:web:web3.storage' },
+    codec: CAR.outbound,
+    channel: HTTP.open({
+      url: w3upUrl,
+      method: 'POST',
+    }),
+  })
+  const w3 = await w3up.create({
+    principal,
+    store,
+    serviceConf: {
+      upload: connection,
+      access: connection,
+      filecoin: connection,
+    },
+    receiptsEndpoint: new URL('/receipt/', w3upUrl),
+  })
+  if (process.env.W3_PROOF) {
+    await w3.addSpace(await parseW3Proof(process.env.W3_PROOF))
+  }
   return w3
 }
 
 /**
  * get a @web3-storage/access/agent instance with default store
+ * @param {URL} w3upUrl - url to w3up ucanto endpoint
  */
-async function getDefaultW3upAgent() {
-  const w3 = await getDefaultW3up()
+async function getDefaultW3upAgent(w3upUrl) {
+  const w3 = await getDefaultW3up(w3upUrl)
   // @ts-expect-error _agent is protected property
   const access = w3._agent
   return access
@@ -64,6 +101,11 @@ async function main(argv) {
   const { values } = parseArgs({
     args,
     options: {
+      ipfs: {
+        type: 'string',
+        help: 'URL of IPFS gateway to use to resolve Upload part CIDs',
+        default: 'https://w3s.link'
+      },
       space: {
         type: 'string',
         help: 'space DID to migrate to',
@@ -71,24 +113,36 @@ async function main(argv) {
       'expect-store-add-status': {
         type: 'string',
         help: "If pesent, migration with stop with error if it encounters a store/add response whose status is not this value.  ",
+      },
+      w3up: {
+        type: 'string',
+        help: 'URL of w3up API to connect to',
+        default: 'https://up.web3.storage',
+      },
+      log: {
+        type: 'string',
+        help: 'path to file to log migration events to',
       }
     },
   })
 
-  const agent = await getDefaultW3upAgent()
+  /** @type {URL} */
+  let w3upUrl
+  try { w3upUrl = new URL(values.w3up) }
+  catch (error) {
+    throw new Error('unable to parse w3up option as URL', { cause: error })
+  }
+
+  const agent = await getDefaultW3upAgent(w3upUrl)
 
   // source of uploads is stdin by default
-  /** @type {AsyncIterable<W32023Upload>} */
-  let source
-  let isInteractive
   // except stdin won't work if nothing is piped in.
   // If nothing piped in, ask the user what to do.
-  if (!process.stdin.isTTY) {
-    source = new W32023UploadsFromNdjson(Readable.toWeb(process.stdin))
-  } else {
-    source = await getUploadsFromPrompts()
-    isInteractive = true
-  }
+  const isInteractive = process.stdin.isTTY
+  let source = isInteractive
+    ? await getUploadsFromPrompts()
+    : new W32023UploadsFromNdjson(Readable.toWeb(process.stdin))
+    
   let spaceValue = values.space
     // if interactive, we can use env vars and check for confirmation
     ?? (isInteractive ? (process.env.W3_SPACE ?? process.env.WEB3_SPACE) : undefined)
@@ -100,7 +154,7 @@ async function main(argv) {
     }
   }
   if (isInteractive && !spaceValue) {
-    const chosenSpace = await promptForSpace()
+    const chosenSpace = await promptForSpace(w3upUrl)
     console.warn('using space', chosenSpace.did())
     spaceValue = chosenSpace.did()
   }
@@ -109,13 +163,17 @@ async function main(argv) {
   }
   const space = DID.match({ method: 'key' }).from(spaceValue)
 
+  // write ndjson events here
+  const ndJsonLog = values.log ? createWriteStream(values.log) : undefined
+
   const migration = migrate({
+    concurrency: 4,
     issuer: agent.issuer,
     w3up: agent.connection,
     source: Readable.toWeb(Readable.from(source)),
     destination: new URL(space),
     async fetchPart(cid, { signal }) {
-      return await fetch(new URL(`/ipfs/${cid}`, 'https://w3s.link'), { signal })
+      return await fetch(new URL(`/ipfs/${cid}`, values.ipfs), { signal })
     },
     onStoreAddReceipt(receipt) {
       const expectedStatus = values['expect-store-add-status']
@@ -134,8 +192,45 @@ async function main(argv) {
       },
     ])
   })
+  
+  const sourceLength = 'length' in source ? await source.length : undefined
+  let uploadMigrationFailureCount = 0
+  let uploadMigrationSuccessCount = 0
+  const start = new Date
+  const getProgressMessage = () => {
+    const progress = `${uploadMigrationSuccessCount}/${sourceLength}`
+    const percent = (uploadMigrationSuccessCount/sourceLength)
+    const durationMs = Number(new Date) - Number(start)
+    const etaMs = durationMs / percent
+    const etaSeconds = etaMs / 1000
+    const etaMinutes = etaSeconds / 60
+    return `migrating to w3up… Uploads:${progress} ${uploadMigrationFailureCount ? `Failures:${uploadMigrationFailureCount} ` : ``}ETA:${etaMinutes.toFixed(1)}min`
+  }
+  const ui = isInteractive ? new inquirer.ui.BottomBar() : undefined
   for await (const event of migration) {
-    console.log(JSON.stringify(event, stringifyForMigrationProgressStdio, isInteractive ? 2 : undefined))
+    // write ndjson to log file, if there is one
+    ndJsonLog?.write(JSON.stringify(event, stringifyForMigrationProgressStdio) + '\n')
+
+    if (event instanceof UploadMigrationFailure) {
+      uploadMigrationFailureCount++
+      // write failures to stderr
+      console.warn(JSON.stringify(event, stringifyForMigrationProgressStdio, isInteractive ? 2 : undefined))
+    } else {
+      uploadMigrationSuccessCount++
+      const space = event.add.receipt.ran.capabilities[0].with
+      const root = event.add.receipt.ran.capabilities[0].nb.root
+      const consoleLink = `https://console.web3.storage/space/${space}/root/${root}`
+      if (ui) {
+        ui?.log.write(consoleLink)
+      }
+    }
+    ui?.updateBottomBar(getProgressMessage())
+  }
+  if (uploadMigrationFailureCount) {
+    console.warn(`failed to migrate ${uploadMigrationFailureCount}/${uploadMigrationSuccessCount+uploadMigrationFailureCount} uploads`)
+    process.exit(1)
+  } else {
+    console.warn(`migrated ${uploadMigrationSuccessCount+uploadMigrationFailureCount} uploads`)
   }
 }
 
@@ -146,7 +241,6 @@ async function main(argv) {
  * @param {string[]} args - cli flags to parse
  */
 async function migratePartCli(spaceDid, args) {
-  const agent = await getDefaultW3upAgent()
   const { values } = parseArgs({
     args,
     options: {
@@ -154,8 +248,20 @@ async function migratePartCli(spaceDid, args) {
         type: 'string',
         help: 'CID to migrate',
       },
+      w3up: {
+        type: 'string',
+        help: 'URL of w3up API to connect to',
+        default: 'https://up.web3.storage',
+      },
     },
   })
+  /** @type {URL} */
+  let w3upUrl
+  try { w3upUrl = new URL(values.w3up) }
+  catch (error) {
+    throw new Error('unable to parse w3up option as URL', { cause: error })
+  }
+  const agent = await getDefaultW3upAgent(w3upUrl)
   const authorization = agent.proofs([{ can: 'store/add', with: spaceDid }])
   const add = Store.add.invoke({
     issuer: agent.issuer,
@@ -178,20 +284,28 @@ async function migratePartCli(spaceDid, args) {
  * @param {any} value - json property value
  */
 function stringifyForMigrationProgressStdio(key, value) {
-  if (key === 'receipt' && value) {
-    return receiptToJson(value)
-  }
   if (value instanceof Map) {
     return Object.fromEntries(value.entries())
+  }
+  if (value instanceof W32023Upload) {
+    return (new W32023UploadSummary(value)).toJSON()
+  }
+  if ((value instanceof Error) && (!('toJSON' in value) || typeof value.toJSON !== 'function')) {
+    return {
+      name: value.name,
+      message: value.message,
+      cause: value.cause,
+    }
   }
   return value
 }
 
 /**
  * get a Space by using interactive cli prompts using inquirer
+ * @param {URL} w3upUrl - url to w3up
  */
-async function promptForSpace() {
-  const w3up = await getDefaultW3up()
+async function promptForSpace(w3upUrl) {
+  const w3up = await getDefaultW3up(w3upUrl)
 
   const selection = await select({
     message: 'choose a space',
@@ -211,7 +325,7 @@ async function promptForSpace() {
  * get a stream of w32023 uploads via
  * interactive prompts using inquirer
  * + old web3.storage client library
- * @returns {Promise<AsyncIterable<W32023Upload>>} uploads
+ * @returns {Promise<AsyncIterable<W32023Upload> & { length: Promise<number> }>} uploads
  */
 async function getUploadsFromPrompts() {
   const confirmation = await confirm({
@@ -228,10 +342,18 @@ async function getUploadsFromPrompts() {
     })
   }
   const oldW3 = new Web3Storage({ token })
-  const uploads = oldW3.list()
-  return uploads
+  const uploads = (async function * () {
+    for await (const u of oldW3.list()) {
+      if (u) yield new W32023Upload(u)
+    }
+  }())
+  // get count
+  const userUploadsResponse = fetch(`https://api.web3.storage/user/uploads`, {
+    headers: { authorization: `Bearer ${token}`},
+  })
+  const count = userUploadsResponse.then(r => parseInt(r.headers.get('count'), 10)).then(c => isNaN(c) ? undefined : c)
+  return Object.assign(uploads, { length: count })
 }
-
 
 // multicodec codec for CAR bytes
 const CAR_CODE = 0x0202
