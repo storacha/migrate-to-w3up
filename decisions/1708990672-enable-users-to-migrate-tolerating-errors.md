@@ -8,7 +8,7 @@ Authors
 We are trying to enable this user story:
 * As a user of old.web3.storage who wants to migrate to w3 up, I can use migrate-to-w3up to migrate all my uploads from old.web3.storage to a w3up space, so I can stop using old.web3.storage but still expect all my old uploads to be available on IPFS.
 
-To some extent we have, but it leaves a lot of room for improvement in really big migration runs. For example, I have been testing an account with more than $370k uploads. This means at least that many invocations, and at that scale we're likely to face 'normal errors' that we may not be able to rely on avoiding alltogether.
+To some extent we have, but it leaves a lot of room for improvement in really big migration runs. For example, I have been testing an account with more than 370k uploads. This means at least that many invocations, and at that scale we're likely to face 'normal errors' that we may not be able to rely on avoiding alltogether.
 
 When these errors happen now, the migration process halts due to an unexpected error. This means when you do a big migration run an encounter a 'normal error', you may not find out for a couple hours, then see the error later, and there isn't a way to continue migrating from the last upload that worked.
 
