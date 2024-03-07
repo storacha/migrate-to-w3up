@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "noUnusedParameters": false,
+    "module": "NodeNext",
+    "checkJs": true,
+    "skipLibCheck": true,
+    "target": "ES2022",
+    "outDir": "dist",
+    "noEmit": true,
+    "lib": ["DOM"]
+  },
+  "include": ["./*.js", "./src", "./test"],
+  "references": [
+  ]
+}

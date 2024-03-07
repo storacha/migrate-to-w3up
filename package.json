@@ -5,15 +5,87 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test",
+    "tsc": "tsc --build",
+    "lint": "npx eslint *.js"
   },
   "author": "Alan Shaw",
   "license": "MIT",
+  "eslintConfig": {
+    "extends": [
+      "eslint:recommended",
+      "plugin:@typescript-eslint/recommended",
+      "plugin:jsdoc/recommended-typescript-flavor"
+    ],
+    "plugins": [
+      "jsdoc",
+      "@typescript-eslint"
+    ],
+    "rules": {
+      "jsdoc/no-undefined-types": [
+        1,
+        {
+          "definedTypes": [
+            "AsyncIterable"
+          ]
+        }
+      ],
+      "jsdoc/require-returns": "off",
+      "jsdoc/require-yields": "off",
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          "args": "none"
+        }
+      ]
+    },
+    "env": {
+      "node": true,
+      "es2020": true
+    },
+    "parser": "@typescript-eslint/parser",
+    "parserOptions": {
+      "project": [
+        "./tsconfig.json"
+      ],
+      "ecmaVersion": 14,
+      "sourceType": "module"
+    }
+  },
   "dependencies": {
+    "@inquirer/password": "^1.1.14",
+    "@inquirer/prompts": "^3.3.0",
+    "@ipld/car": "^5.2.6",
+    "@ipld/dag-pb": "^4.0.8",
     "@ipld/unixfs": "^2.1.2",
+    "@ucanto/validator": "^9.0.1",
+    "@web3-storage/access": "^18.1.1",
+    "@web3-storage/capabilities": "^13.0.0",
     "@web3-storage/pail": "^0.4.0",
-    "carstream": "^1.1.1",
+    "@web3-storage/w3up-client": "^12.1.0",
+    "carstream": "^2.0.0",
+    "inquirer": "^9.2.15",
+    "ipfs-unixfs-exporter": "^13.4.0",
     "multiformats": "^13.0.1",
-    "web3.storage": "^4.5.5"
+    "ndjson-readablestream": "^1.1.0",
+    "parallel-transform-web": "^1.0.1",
+    "uint8arrays": "^5.0.2",
+    "web3.storage": "^4.5.5",
+    "@ucanto/client": "^9.0.0",
+    "@ucanto/principal": "^9.0.0",
+    "@ucanto/server": "^9.0.1",
+    "@ucanto/transport": "^9.0.2"
+  },
+  "bin": {
+    "migrate-to-w3up": "./migrate-to-w3up.js"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^6.19.1",
+    "eslint-plugin-jsdoc": "^48.0.4",
+    "typescript": "^5.3.3"
+  },
+  "engineStrict": true,
+  "engines": {
+    "node": "18"
   }
 }
