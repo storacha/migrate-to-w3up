@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { W32023Upload, W32023UploadSummary, W32023UploadsFromNdjson } from "./w32023.js";
-import { fileURLToPath } from 'url'
-import fs, { createReadStream, createWriteStream } from 'fs'
+import { fileURLToPath } from 'node:url'
+import fs, { createReadStream, createWriteStream } from 'node:fs'
 import { Readable } from 'node:stream'
 import * as w3up from "@web3-storage/w3up-client"
 import { parseArgs } from 'node:util'
