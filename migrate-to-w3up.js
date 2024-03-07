@@ -14,10 +14,7 @@ import { Web3Storage } from 'web3.storage'
 import promptForPassword from '@inquirer/password';
 import { carPartToStoreAddNb, migrate } from "./w32023-to-w3up.js";
 import { UploadMigrationFailure, UploadMigrationSuccess, UploadPartMigrationFailure, receiptToJson } from "./w3up-migration.js";
-import * as Link from 'multiformats/link'
 import { Store } from "@web3-storage/capabilities";
-import { fromString } from 'uint8arrays'
-import * as Digest from 'multiformats/hashes/digest'
 import { connect } from '@ucanto/client'
 import { CAR, HTTP } from '@ucanto/transport'
 import { StoreMemory } from "@web3-storage/access/stores/store-memory";
@@ -25,6 +22,7 @@ import * as ed25519Principal from '@ucanto/principal/ed25519'
 import { parseW3Proof } from "./w3-env.js";
 import inquirer from 'inquirer';
 import readNDJSONStream from 'ndjson-readablestream'
+import { stringToCarCid } from "./utils.js";
 
 // if this file is being executed directly, run main() function
 const isMain = (url, argv = process.argv) => fileURLToPath(url) === fs.realpathSync(argv[1])
@@ -360,40 +358,11 @@ async function getUploadsFromPrompts() {
   return Object.assign(uploads, { length: count })
 }
 
-// multicodec codec for CAR bytes
-const CAR_CODE = 0x0202
-
-/**
- * Attempts to extract a CAR CID from a bucket key.
- * @param {string} key - string to parse to a CAR CID. e.g. a carpark bucket key basename
- */
-const stringToCarCid = key => {
-  let errParseCid
-  try {
-    // recent buckets encode CAR CID in filename
-    const cid = Link.parse(key).toV1()
-    return cid
-  } catch (err) {
-    errParseCid = err
-  }
-  // older buckets base32 encode a CAR multihash <base32(car-multihash)>.car
-  // try to parse as base32
-  let errParseBase32
-  try {
-    const digestBytes = fromString(key, 'base32')
-    const digest = Digest.decode(digestBytes)
-    return Link.create(CAR_CODE, digest)
-  } catch (error) {
-    errParseBase32 = error
-    throw error
-  }
-}
-
 /**
  * cli for `migrate-to-w3up log ` ...
  * `migrate-to-w3up log uploads-from-failures` should extract uploads from UploadMigrationFailure events in the log
  *   and log them to stdout.
- * @param {string[]} args
+ * @param {string[]} args - command line arguments
  */
 async function migrationLogCli(...args) {
   const { values, positionals } = parseArgs({
