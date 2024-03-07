@@ -38,7 +38,9 @@ You will then see a series of prompts asking you:
   * old.web3.storage uploads list from `WEB3_TOKEN` environment variable, if set and user confirms
   * old.web3.storage list from `WEB3_TOKEN` that user inputs into prompt
 
-### filter mode
+### Advanced usage
+
+#### Unix filter
 
 You can also use `migrate-to-w3up` as a [unix filter][].
 
