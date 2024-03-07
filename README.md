@@ -74,9 +74,8 @@ This includes `UploadMigrationSuccess` and `UploadMigrationFailure` events. The 
 
 ```shell
 # set this to a space did
-MIGRATION_START="$(date +%s)"
-migration_log="/tmp/migrate-to-w3up.$MIGRATION_START.log"
-migrate-to-w3up --log "$migration_log" --space "$W3_SPACE"
+MIGRATION_LOG="/tmp/migrate-to-w3up.$(date +%s).log"
+migrate-to-w3up --log "$MIGRATION_LOG" --space "$W3_SPACE"
 # wait quite some time
 ```
 
@@ -85,9 +84,9 @@ migrate-to-w3up --log "$migration_log" --space "$W3_SPACE"
 Because the log contains good records of any failures, you can use it to do a second migration run of any uploads that failed to migrate.
 
 ```shell
-migration2_log="/tmp/migrate-to-w3up.$MIGRATION_START.log"
+MIGRATION2_LOG="/tmp/migrate-to-w3up.$(date +%s).log"
 # retry migrating any uploads from UploadMigrationFailure
-migrate-to-w3up log get-uploads-from-failures "$migration2_log" | migrate-to-w3up --space "$W3_SPACE"
+migrate-to-w3up log get-uploads-from-failures "$MIGRATION2_LOG" | migrate-to-w3up --space "$W3_SPACE"
 ```
 
 #### Migrate a single CAR part
