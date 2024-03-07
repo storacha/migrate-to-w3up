@@ -26,7 +26,7 @@ Warning!
     * to be extra careful, use filter mode and export your uploads from your source to a file. inspect the file to make sure it only contains uploads you want to migrate. Then pipe that file to `migrate-to-w3up` filter mode.
 * the space you migrate to must have a [w3 storage provider][] attached. This usually means the storage provider will charge the account that added the storage provider to the space for any migrated files.
 
-### space wizard 🧙‍♀️ mode
+### Easy mode (using the migration wizard 🧙‍♀️)
 
 ```
 migrate-to-w3up
