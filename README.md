@@ -83,7 +83,7 @@ migration2_log="/tmp/migrate-to-w3up.$migration_start.log"
 migrate-to-w3up log get-uploads-from-failures "$migration2_log" | migrate-to-w3up --space "$space"
 ```
 
-### migrate a single CAR part
+#### Migrate a single CAR part
 
 Runs a single `store/add` invocation with the provided CAR link and show the output (this is mostly for w3up debuggers).
 
