@@ -74,8 +74,8 @@ This includes `UploadMigrationSuccess` and `UploadMigrationFailure` events. The 
 
 ```shell
 # set this to a space did
-MIGRATION_LOG="/tmp/migrate-to-w3up.$(date +%s).log"
-migrate-to-w3up --log "$MIGRATION_LOG" --space "$W3_SPACE"
+MIGRATION_LOG_1="/tmp/migrate-to-w3up.$(date +%s).log"
+migrate-to-w3up --log "$MIGRATION_LOG_1" --space "$W3_SPACE"
 # wait quite some time
 ```
 
@@ -84,9 +84,14 @@ migrate-to-w3up --log "$MIGRATION_LOG" --space "$W3_SPACE"
 Because the log contains good records of any failures, you can use it to do a second migration run of any uploads that failed to migrate.
 
 ```shell
-MIGRATION2_LOG="/tmp/migrate-to-w3up.$(date +%s).log"
+# MIGRATION_LOG_1 should be set from before
+MIGRATION_LOG_2="/tmp/migrate-to-w3up.$(date +%s).log"
+
 # retry migrating any uploads from UploadMigrationFailure
-migrate-to-w3up log get-uploads-from-failures "$MIGRATION2_LOG" | migrate-to-w3up --space "$W3_SPACE"
+migrate-to-w3up log get-uploads-from-failures "$MIGRATION_LOG_1" | migrate-to-w3up --log "$MIGRATION_LOG_2" --space "$W3_SPACE"
+
+# check for failures from second log. rinse and repeat?
+migrate-to-w3up log get-uploads-from-failures "$MIGRATION_LOG_2"
 ```
 
 #### Migrate a single CAR part
@@ -104,7 +109,7 @@ migrate-to-w3up $W3_SPACE store/add --link bagbaieranc6p56qopyqzqzy6x4hzow2konpq
 Example
 
 ```shell
-⚡ migrate-to-w3up $W3_SPACE store/add --link ciqgrph67ihh4imym4pl6d4xlnfhgxycdr4hcm6g6ucnzuxzqsorpsq
+$ migrate-to-w3up $W3_SPACE store/add --link ciqgrph67ihh4imym4pl6d4xlnfhgxycdr4hcm6g6ucnzuxzqsorpsq
 {
   "ok": {
     "link": {
