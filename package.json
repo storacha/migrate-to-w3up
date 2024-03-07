@@ -70,18 +70,22 @@
     "ndjson-readablestream": "^1.1.0",
     "parallel-transform-web": "^1.0.1",
     "uint8arrays": "^5.0.2",
-    "web3.storage": "^4.5.5"
+    "web3.storage": "^4.5.5",
+    "@ucanto/client": "^9.0.0",
+    "@ucanto/principal": "^9.0.0",
+    "@ucanto/server": "^9.0.1",
+    "@ucanto/transport": "^9.0.2"
   },
   "bin": {
     "migrate-to-w3up": "./migrate-to-w3up.js"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^6.19.1",
-    "@ucanto/client": "^9.0.0",
-    "@ucanto/principal": "^9.0.0",
-    "@ucanto/server": "^9.0.1",
-    "@ucanto/transport": "^9.0.2",
     "eslint-plugin-jsdoc": "^48.0.4",
     "typescript": "^5.3.3"
+  },
+  "engineStrict": true,
+  "engines": {
+    "node": "18"
   }
 }
