@@ -67,7 +67,7 @@ migrate-to-w3up --space="$space" \
 w32023-export | migrate-to-w3up --space="$space" | jq
 ```
 
-### migrate w/ log
+#### Migrate w/ log
 
 `migrate-to-w3up --log /tmp/migrate-to-w3up.$(date +%s).log` will run the migration and write migration events to the provided logfile.
 This includes `UploadMigrationSuccess` and `UploadMigrationFailure` events. The latter are logged along with the source upload that could not be migrated, and this allows the log file to serve as a source of uploads to be migrated in a second migration run to retry any failures.
