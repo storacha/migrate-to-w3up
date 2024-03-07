@@ -17,7 +17,8 @@ npm install -g migrate-to-w3up
 
 ## Usage
 
-Warning!
+⚠️ **Warning!** ⚠️
+
 * this is alpha software and we're still testing it with big uploads. If that sounds scary, check back for the v1 release when we've done a couple migrations in production.
 * if a migration errors part of the way through
     * you can't undo the partial migration
