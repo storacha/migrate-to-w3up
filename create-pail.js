@@ -6,7 +6,7 @@ import { Web3Storage } from 'web3.storage'
 import * as Link from 'multiformats/link'
 import { CARWriterStream } from 'carstream/writer'
 
-const token = process.env.WEB3_STORAGE_TOKEN ?? ''
+const token = process.env.WEB3_TOKEN ?? ''
 const storage = new Web3Storage({ token })
 
 const blocks = new MemoryBlockstore()
