@@ -4,7 +4,7 @@ import { Web3Storage } from 'web3.storage'
 import * as Link from 'multiformats/link'
 import { CARWriterStream } from 'carstream/writer'
 
-const token = process.env.WEB3_STORAGE_TOKEN ?? ''
+const token = process.env.WEB3_TOKEN ?? ''
 const endpoint = process.env.WEB3_URL ? new URL(process.env.WEB3_URL) : undefined
 const storage = new Web3Storage({ token, endpoint })
 
