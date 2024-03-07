@@ -51,12 +51,12 @@ Just pipe in [ndjson][] of old.web3.storage Uploads objects.
 # gets current w3cli space (requires jq).
 # copypasta from `w3 space ls` to pick another one,
 # or do `w3 space use <space>` first
-space=$(w3 space info --json | jq '.did' -r)
+W3_SPACE=$(w3 space info --json | jq '.did' -r)
 
 # define a command to get uploads as migration source
 alias w32023-export='npx @web3-storage/w3@latest list --json'
 
-migrate-to-w3up --space="$space" \
+migrate-to-w3up --space="$W3_SPACE" \
 < <(w32023-export) \
 | tee -a /tmp/migrate-to-w3up.$(date +%s).log
 # include the previous line only if you want a logfile
@@ -64,7 +64,7 @@ migrate-to-w3up --space="$space" \
 # this also works
 # jq optional but useful for pretty printing
 # https://jqlang.github.io/jq/
-w32023-export | migrate-to-w3up --space="$space" | jq
+w32023-export | migrate-to-w3up --space="$W3_SPACE" | jq
 ```
 
 #### Migrate w/ log
@@ -74,14 +74,20 @@ This includes `UploadMigrationSuccess` and `UploadMigrationFailure` events. The 
 
 ```shell
 # set this to a space did
-space=$W3_SPACE
-migration_start="$(date +%s)"
-migration_log="/tmp/migrate-to-w3up.$migration_start.log"
-migrate-to-w3up --log "$migration_log" --space "$space"
+MIGRATION_START="$(date +%s)"
+migration_log="/tmp/migrate-to-w3up.$MIGRATION_START.log"
+migrate-to-w3up --log "$migration_log" --space "$W3_SPACE"
 # wait quite some time
-migration2_log="/tmp/migrate-to-w3up.$migration_start.log"
+```
+
+##### Retry Failures from Log
+
+Because the log contains good records of any failures, you can use it to do a second migration run of any uploads that failed to migrate.
+
+```shell
+migration2_log="/tmp/migrate-to-w3up.$MIGRATION_START.log"
 # retry migrating any uploads from UploadMigrationFailure
-migrate-to-w3up log get-uploads-from-failures "$migration2_log" | migrate-to-w3up --space "$space"
+migrate-to-w3up log get-uploads-from-failures "$migration2_log" | migrate-to-w3up --space "$W3_SPACE"
 ```
 
 #### Migrate a single CAR part
@@ -90,16 +96,16 @@ Runs a single `store/add` invocation with the provided CAR link and show the out
 
 ```shell
 # base32 multihash CAR link
-migrate-to-w3up $space store/add --link ciqgrph67ihh4imym4pl6d4xlnfhgxycdr4hcm6g6ucnzuxzqsorpsq
+migrate-to-w3up $W3_SPACE store/add --link ciqgrph67ihh4imym4pl6d4xlnfhgxycdr4hcm6g6ucnzuxzqsorpsq
 
 # CIDv1 CAR link
-migrate-to-w3up $space store/add --link bagbaieranc6p56qopyqzqzy6x4hzow2konpqehdyoez4n5ie3tjptbe5c7fa
+migrate-to-w3up $W3_SPACE store/add --link bagbaieranc6p56qopyqzqzy6x4hzow2konpqehdyoez4n5ie3tjptbe5c7fa
 ```
 
 Example
 
 ```shell
-⚡ migrate-to-w3up $space store/add --link ciqgrph67ihh4imym4pl6d4xlnfhgxycdr4hcm6g6ucnzuxzqsorpsq
+⚡ migrate-to-w3up $W3_SPACE store/add --link ciqgrph67ihh4imym4pl6d4xlnfhgxycdr4hcm6g6ucnzuxzqsorpsq
 {
   "ok": {
     "link": {
