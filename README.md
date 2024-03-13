@@ -40,32 +40,6 @@ You will then see a series of prompts asking you:
 
 ### Advanced usage
 
-#### Unix filter
-
-You can also use `migrate-to-w3up` as a [unix filter][].
-
-Just pipe in [ndjson][] of old.web3.storage Uploads objects.
-
-```shell
-# gets current w3cli space (requires jq).
-# copypasta from `w3 space ls` to pick another one,
-# or do `w3 space use <space>` first
-W3_SPACE=$(w3 space info --json | jq '.did' -r)
-
-# define a command to get uploads as migration source
-alias w32023-export='npx @web3-storage/w3@latest list --json'
-
-migrate-to-w3up --space="$W3_SPACE" \
-< <(w32023-export) \
-| tee -a /tmp/migrate-to-w3up.$(date +%s).log
-# include the previous line only if you want a logfile
-
-# this also works
-# jq optional but useful for pretty printing
-# https://jqlang.github.io/jq/
-w32023-export | migrate-to-w3up --space="$W3_SPACE" | jq
-```
-
 #### Migrate w/ log
 
 `migrate-to-w3up --log /tmp/migrate-to-w3up.$(date +%s).log` will run the migration and write migration events to the provided logfile.
@@ -91,6 +65,32 @@ migrate-to-w3up log get-uploads-from-failures "$MIGRATION_LOG_1" | migrate-to-w3
 
 # check for failures from second log. rinse and repeat?
 migrate-to-w3up log get-uploads-from-failures "$MIGRATION_LOG_2"
+```
+
+#### Unix filter
+
+You can also use `migrate-to-w3up` as a [unix filter][].
+
+Just pipe in [ndjson][] of old.web3.storage Uploads objects.
+
+```shell
+# gets current w3cli space (requires jq).
+# copypasta from `w3 space ls` to pick another one,
+# or do `w3 space use <space>` first
+W3_SPACE=$(w3 space info --json | jq '.did' -r)
+
+# define a command to get uploads as migration source
+alias w32023-export='npx @web3-storage/w3@latest list --json'
+
+migrate-to-w3up --space="$W3_SPACE" \
+< <(w32023-export) \
+| tee -a /tmp/migrate-to-w3up.$(date +%s).log
+# include the previous line only if you want a logfile
+
+# this also works
+# jq optional but useful for pretty printing
+# https://jqlang.github.io/jq/
+w32023-export | migrate-to-w3up --space="$W3_SPACE" | jq
 ```
 
 #### Migrate a single CAR part
