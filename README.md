@@ -19,7 +19,6 @@ npm install -g migrate-to-w3up
 
 ⚠️ **Warning!** ⚠️
 
-* this is alpha software and we're still testing it with big uploads. If that sounds scary, check back for the v1 release when we've done a couple migrations in production.
 * if a migration errors part of the way through
     * you can't undo the partial migration
     * retrying the migration will start from the beginning, but anything already migrated should be super fast because it will just verify that the w3up space already has an Upload with the right cid.
