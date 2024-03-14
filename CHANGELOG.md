@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.3](https://github.com/web3-storage/migrate-to-w3up/compare/migrate-to-w3up-v1.0.2...migrate-to-w3up-v1.0.3) (2024-03-14)
+
+
+### Other Changes
+
+* v1.0.3 ([458b9da](https://github.com/web3-storage/migrate-to-w3up/commit/458b9da1cc114d94bd2a34e560d6782e01fab9da))
+
 ## [1.0.2](https://github.com/web3-storage/migrate-to-w3up/compare/migrate-to-w3up-v1.0.1...migrate-to-w3up-v1.0.2) (2024-03-14)
 
 
