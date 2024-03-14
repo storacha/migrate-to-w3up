@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/web3-storage/migrate-to-w3up/compare/migrate-to-w3up-v1.0.1...migrate-to-w3up-v1.0.2) (2024-03-14)
+
+
+### ci
+
+* .github/workflows/release.yml uses nodejs v20 not v12 ([b5c08da](https://github.com/web3-storage/migrate-to-w3up/commit/b5c08daabcd972b94f1201f97adf2af24192820f))
+
 ## [1.0.1](https://github.com/web3-storage/migrate-to-w3up/compare/migrate-to-w3up-v1.0.0...migrate-to-w3up-v1.0.1) (2024-03-14)
 
 

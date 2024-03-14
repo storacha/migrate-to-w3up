@@ -1,6 +1,6 @@
 {
   "name": "migrate-to-w3up",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Migrate data from old web3.storage to w3up",
   "main": "index.js",
   "exports": {
