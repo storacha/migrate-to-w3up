@@ -39,7 +39,7 @@ jobs:
     - if: ${{ steps.release.outputs.release_created || inputs.force_npm_publish }}
       uses: actions/setup-node@v4
       with:
-        node-version: 12
+        node-version: 20.11.1
         registry-url: 'https://registry.npmjs.org'
 
     - if: ${{ steps.release.outputs.release_created || inputs.force_npm_publish }}
