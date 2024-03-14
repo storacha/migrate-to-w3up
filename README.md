@@ -123,7 +123,7 @@ $ migrate-to-w3up $W3_SPACE store/add --link ciqgrph67ihh4imym4pl6d4xlnfhgxycdr4
 
 ## How it Works
 
-### [w32023-to-w3up.js](./w32023-to-w3up.js)
+### [`migrate-to-w3up/from-w32023`](./from-w32023.js)
 
 * exports a `migrate` function that runs a migration, returning an `AsyncIterable` of `MigratedUpload<W32023Upload>` that includes [ucanto receipts][] for every request sent to w3up as part of the migration.
 

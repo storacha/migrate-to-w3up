@@ -3,8 +3,14 @@
   "version": "0.0.0",
   "description": "Migrate data from old web3.storage to w3up",
   "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./from-w32023": "./from-w32023.js"
+  },
   "type": "module",
   "scripts": {
+    "build": "npm run tsc",
+    "prepare": "npm run build",
     "test": "node --test",
     "tsc": "tsc --build",
     "lint": "npx eslint *.js"
