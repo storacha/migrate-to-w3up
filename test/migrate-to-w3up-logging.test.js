@@ -23,7 +23,7 @@ import { readUploadsFromUploadMigrationFailuresNdjson } from '../w3up-migration.
 
 /** make a temporary file path that can be used for test migration logfiles  */
 async function getTmpLogFilePath() {
-  const tmp = await fs.mkdtemp(await fs.realpath(tmpdir()))
+  const tmp = await fs.realpath(tmpdir())
   const path = join(tmp, `migrate-to-w3up-test-${Date.now()}`)
   return path
 }
