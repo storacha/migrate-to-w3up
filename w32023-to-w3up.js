@@ -36,6 +36,7 @@ export async function* migrate(options) {
   }
   /** @type {Array<UploadPartMigrationFailure|UploadMigrationFailure<W32023Upload>>} */
   const failures = []
+  let uploadCidToParts = new Map
   const results = source
     .pipeThrough(new TransformStream(new UploadToFetchableUploadPart({ fetchPart })))
     .pipeThrough(
@@ -55,7 +56,7 @@ export async function* migrate(options) {
         return failure
       }))
     )
-    .pipeThrough(new TransformStream(new CollectMigratedUploadParts))
+    .pipeThrough(new TransformStream(new CollectMigratedUploadParts(uploadCidToParts, signal)))
     .pipeThrough(new TransformStream({
       /**
        * @param {UploadMigrationFailure<W32023Upload>|MigratedUploadParts<W32023Upload>} item - item to transform
@@ -72,7 +73,6 @@ export async function* migrate(options) {
       }
     }))
     .pipeThrough(new TransformStream(new InvokeUploadAddForMigratedParts({ w3up, issuer, destination, authorization, signal })))
-  const reader = results.getReader()
   const queue = []
   let resultsDone = false
   while (true) {
@@ -81,6 +81,7 @@ export async function* migrate(options) {
     // watch for results and failures at same time,
     // adding any results/failures to queue to get yielded
     const raceAbort = new AbortController
+    const reader = results.getReader()
     try {
       await Promise.race([
         // get next result and push to on resultsQs
@@ -101,6 +102,7 @@ export async function* migrate(options) {
         })()
       ])
     } finally {
+      reader.releaseLock()
       raceAbort.abort()
     }
     // after the previous race, the queue should have at least one item unless there are no more results
@@ -111,7 +113,6 @@ export async function* migrate(options) {
       yield queue.pop()
     }
   }
-  reader.releaseLock()
 }
 
 /**
@@ -169,17 +170,21 @@ async function migratePart({ part, signal, issuer, authorization, destination, w
     const failure = Object.assign(new UploadPartMigrationFailure, {
       part: part.part,
       cause: receipt.out.error,
-      upload: part.upload, 
+      upload: part.upload,
     })
     return failure
   }
 
   const storeAddSuccess = receipt.out.ok
-  const copyResponse = storeAddSuccess && await uploadBlockForStoreAddSuccess(
-    // @ts-expect-error no svc type
-    receipt.out.ok,
-    partFetchResponse,
-  )
+  let copyResponse
+  // @ts-expect-error storeAddSuccess has vague type
+  if (storeAddSuccess.status === 'upload') {
+    copyResponse = await uploadBlockForStoreAddSuccess(
+      // @ts-expect-error no svc type
+      receipt.out.ok,
+      partFetchResponse,
+    )
+  }
   /**
    * @type {MigratedUploadPart<W32023Upload>}
    */
@@ -252,7 +257,6 @@ const collectMigratedParts = async function* (
     }
   }
   const collectedAllParts = !missingPart
-
   if (collectedAllParts) {
     // no need to keep this memory around
     uploadCidToParts.delete(upload.cid)
@@ -295,9 +299,11 @@ const collectMigratedParts = async function* (
 class CollectMigratedUploadParts {
   static collectMigratedParts = collectMigratedParts
   /**
+   * @param {Map<string, Map<string, MigratedUploadPart<W32023Upload>|UploadPartMigrationFailure<W32023Upload>>>} uploadCidToParts - Map<upload.cid, Map<part.cid, { response }>> - where to store state while waiting for all parts of an upload
    * @param {AbortSignal} [signal] - emits event when this transformer should abort
    */
-  constructor(signal) {
+  constructor(uploadCidToParts, signal) {
+    this.uploadCidToParts = uploadCidToParts
     this.signal = signal
   }
   /**
@@ -305,7 +311,7 @@ class CollectMigratedUploadParts {
    * @param {TransformStreamDefaultController} controller - enqueue output here
    */
   async transform(input, controller) {
-    if ( ! input) return;
+    if (!input) return;
     try {
       for await (const output of CollectMigratedUploadParts.collectMigratedParts(input, this)) {
         controller.enqueue(output)
@@ -382,13 +388,10 @@ async function uploadBlockForStoreAddSuccess(
   options = {}
 ) {
   switch (storeAddSuccess.status) {
-    case "done":
-      // no work needed
-      return
     case "upload":
       break;
+    case "done":
     default:
-      // @ts-expect-error storeAddSuccess could be never type, but in practice something else
       throw new Error(`unexpected store/add success status: "${storeAddSuccess.status}"`)
   }
   // need to do upload
@@ -483,7 +486,6 @@ class InvokeUploadAddForMigratedParts {
      * @param {TransformStreamDefaultController<UploadMigrationSuccess<W32023Upload>|UploadMigrationFailure<W32023Upload>>} controller - enqueue output her
      */
     this.transform = async function transform(uploadedParts, controller) {
-      controller.error
       if (uploadedParts) {
         try {
           controller.enqueue(await InvokeUploadAddForMigratedParts.transform(uploadedParts, { w3up, issuer, authorization, destination, signal }))
@@ -491,7 +493,7 @@ class InvokeUploadAddForMigratedParts {
           /** @type {UploadMigrationFailure<W32023Upload>} */
           const failure = new UploadMigrationFailure
           failure.cause = error
-          failure.upload = uploadedParts.upload,
+          failure.upload = uploadedParts.upload
           failure.parts = uploadedParts.parts
           controller.enqueue(failure)
         }

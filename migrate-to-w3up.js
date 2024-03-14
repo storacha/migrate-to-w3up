@@ -146,14 +146,14 @@ async function main(argv) {
   let source = isInteractive
     ? await getUploadsFromPrompts()
     : new W32023UploadsFromNdjson(Readable.toWeb(process.stdin))
-    
+
   let spaceValue = values.space
     // if interactive, we can use env vars and check for confirmation
     ?? (isInteractive ? (process.env.W3_SPACE ?? process.env.WEB3_SPACE) : undefined)
   let spaceValueConfirmed
   if (spaceValue && isInteractive) {
     spaceValueConfirmed = await confirm({ message: `migrate to destination space ${spaceValue}?` })
-    if ( ! spaceValueConfirmed) {
+    if (!spaceValueConfirmed) {
       spaceValue = undefined
     }
   }
@@ -162,15 +162,16 @@ async function main(argv) {
     console.warn('using space', chosenSpace.did())
     spaceValue = chosenSpace.did()
   }
-  if ( ! spaceValue) {
+  if (!spaceValue) {
     throw new Error(`Unable to determine migration destination. Will not migrate.`)
   }
   const space = DID.match({ method: 'key' }).from(spaceValue)
 
   // write ndjson events here
   const ndJsonLog = values.log ? createWriteStream(values.log) : undefined
-
+  const migrationAbort = new AbortController
   const migration = migrate({
+    signal: migrationAbort.signal,
     issuer: agent.issuer,
     w3up: agent.connection,
     source: Readable.toWeb(Readable.from(source)),
@@ -195,14 +196,14 @@ async function main(argv) {
       },
     ])
   })
-  
+
   const sourceLength = 'length' in source ? await source.length : undefined
   let uploadMigrationFailureCount = 0
   let uploadMigrationSuccessCount = 0
   const start = new Date
   const getProgressMessage = () => {
     const progress = `${uploadMigrationSuccessCount}/${sourceLength}`
-    const percent = (uploadMigrationSuccessCount/sourceLength)
+    const percent = (uploadMigrationSuccessCount / sourceLength)
     const durationMs = Number(new Date) - Number(start)
     const etaMs = durationMs / percent
     const etaSeconds = etaMs / 1000
@@ -227,13 +228,19 @@ async function main(argv) {
         ui?.log.write(consoleLink)
       }
     }
-    ui?.updateBottomBar(getProgressMessage())
+    ui?.updateBottomBar(getProgressMessage() + '\n')
   }
   if (uploadMigrationFailureCount) {
-    console.warn(`failed to migrate ${uploadMigrationFailureCount}/${uploadMigrationSuccessCount+uploadMigrationFailureCount} uploads`)
+    console.warn(`failed to migrate ${uploadMigrationFailureCount}/${uploadMigrationSuccessCount + uploadMigrationFailureCount} uploads`)
     process.exit(1)
   } else {
-    console.warn(`migrated ${uploadMigrationSuccessCount+uploadMigrationFailureCount} uploads`)
+    console.warn(`migrated ${uploadMigrationSuccessCount + uploadMigrationFailureCount} uploads`)
+    // without this, process will hang at end of successful migration.
+    // I think the following line indicates that the process hangs
+    // due to tcp sockets still open to the server fetched via `options.fetchPart` passed to migrate() above.
+    // A fix is probably to refactor how migration works to not pass around things that reference the response/socket indefinitely.
+    // console.log('process._getActiveHandles()', process._getActiveHandles())
+    process.exit(0)
   }
 }
 
@@ -345,14 +352,16 @@ async function getUploadsFromPrompts() {
     })
   }
   const oldW3 = new Web3Storage({ token })
-  const uploads = (async function * () {
+  const uploads = (async function* () {
     for await (const u of oldW3.list()) {
-      if (u) yield new W32023Upload(u)
+      if (u) {
+        yield new W32023Upload(u)
+      }
     }
   }())
   // get count
   const userUploadsResponse = fetch(`https://api.web3.storage/user/uploads`, {
-    headers: { authorization: `Bearer ${token}`},
+    headers: { authorization: `Bearer ${token}` },
   })
   const count = userUploadsResponse.then(r => parseInt(r.headers.get('count'), 10)).then(c => isNaN(c) ? undefined : c)
   return Object.assign(uploads, { length: count })
@@ -373,7 +382,7 @@ async function migrationLogCli(...args) {
   switch (command) {
     case 'get-uploads-from-failures': {
       const logfile = positionals[1]
-      if ( ! logfile) throw new Error(`provide a logfile path as larg arg`)
+      if (!logfile) throw new Error(`provide a logfile path as larg arg`)
       for await (const event of readNDJSONStream(Readable.toWeb(createReadStream(logfile)))) {
         if (event.type === 'UploadMigrationFailure' && event.upload) {
           console.log(JSON.stringify(event.upload, stringifyForMigrationProgressStdio))
