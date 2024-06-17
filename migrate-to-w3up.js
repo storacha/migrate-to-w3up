@@ -23,6 +23,7 @@ import { parseW3Proof } from "./w3-env.js";
 import inquirer from 'inquirer';
 import readNDJSONStream from 'ndjson-readablestream'
 import { stringToCarCid } from "./utils.js";
+import { getClient as getNftStorageClassicClient } from './classic-nft.storage.js'
 
 // if this file is being executed directly, run main() function
 const isMain = (url, argv = process.argv) => fileURLToPath(url) === fs.realpathSync(argv[1])
@@ -338,10 +339,28 @@ async function promptForSpace(w3upUrl) {
  * @returns {Promise<AsyncIterable<W32023Upload> & { length: Promise<number> }>} uploads
  */
 async function getUploadsFromPrompts() {
-  const confirmation = await confirm({
+  const oldW3sConfirmation = await confirm({
     message: 'no uploads were piped in. Do you want to migrate uploads from old.web3.storage?',
   })
-  if (!confirmation) throw new Error('unable to find a source of uploads to migrate')
+  if (!oldW3sConfirmation) {
+    const classicNftConfirmation = await confirm({
+      message: 'no uploads were piped in. Do you want to migrate uploads from classic-app.nft.storage?',
+    })
+    if (!classicNftConfirmation) {
+      throw new Error('unable to find a source of uploads to migrate')
+    }
+    return getUploadsFromClassicNftStorage()
+  }
+  return getUploadsFromOldWeb3Storage()
+}
+
+/**
+ * get a stream of w32023 uploads via
+ * interactive prompts using inquirer
+ * + old web3.storage client library
+ * @returns {Promise<AsyncIterable<W32023Upload> & { length: Promise<number> }>} uploads
+ */
+async function getUploadsFromOldWeb3Storage() {
   const envToken = process.env.WEB3_TOKEN
   let token;
   if (envToken && await confirm({ message: 'found WEB3_TOKEN in env. Use that?' })) {
@@ -365,6 +384,37 @@ async function getUploadsFromPrompts() {
   })
   const count = userUploadsResponse.then(r => parseInt(r.headers.get('count'), 10)).then(c => isNaN(c) ? undefined : c)
   return Object.assign(uploads, { length: count })
+}
+
+/**
+ * get a stream of nft.storage uploads via
+ * interactive prompts using inquirer
+ *
+ * @returns {Promise<AsyncIterable<W32023Upload> & { length: Promise<number> }>} uploads
+ */
+async function getUploadsFromClassicNftStorage() {
+  const envToken = process.env.NFT_STORAGE_TOKEN
+  let token;
+  if (envToken && await confirm({ message: 'found NFT_STORAGE_TOKEN in env. Use that?' })) {
+    token = envToken
+  } else {
+    token = await promptForPassword({
+      message: 'enter API token for classic-app.nft.storage',
+    })
+  }
+
+  const classicNftStorage = getNftStorageClassicClient({ token })
+
+  const uploads = (async function* () {
+    for await (const u of classicNftStorage.list()) {
+      if (u) {
+        yield new W32023Upload(u)
+      }
+    }
+  }())
+
+  // @ts-expect-error no length available
+  return uploads
 }
 
 /**
