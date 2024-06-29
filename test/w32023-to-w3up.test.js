@@ -1,15 +1,15 @@
 import { test } from 'node:test'
-import { W32023Upload, W32023UploadsFromNdjson } from './w32023.js'
+import { W32023Upload, W32023UploadsFromNdjson } from '../src/w32023.js'
 import assert from 'assert'
 import * as CAR from "@ucanto/transport/car"
 import * as Client from '@ucanto/client'
 import * as ed25519 from '@ucanto/principal/ed25519'
 import * as Server from "@ucanto/server"
-import { migrate } from './w32023-to-w3up.js'
+import { migrate } from '../src/w32023-to-w3up.js'
 import { createServer } from 'http'
-import { MapCidToPromiseResolvers } from './utils.js'
+import { MapCidToPromiseResolvers } from '../src/utils.js'
 import { ReadableStream, TransformStream } from 'stream/web'
-import { UploadMigrationFailure, UploadPartMigrationFailure } from './w3up-migration.js'
+import { UploadMigrationFailure, UploadPartMigrationFailure } from '../src/w3up-migration.js'
 import { createCarFinder, locate } from './test-utils.js'
 
 /** example uploads from `w3 list --json` */

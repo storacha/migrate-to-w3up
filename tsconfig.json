@@ -10,7 +10,7 @@
     "noEmit": true,
     "lib": ["DOM"]
   },
-  "include": ["./*.js", "./src", "./test"],
+  "include": ["./*.js", "./src", "./test", "bin/migrate-to-w3up.js"],
   "references": [
   ]
 }

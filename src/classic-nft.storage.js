@@ -1,19 +1,37 @@
+import { W32023Upload } from "../src/w32023.js";
+
 export const API = 'https://api.nft.storage'
 
-export function getClient ({
+/**
+ * get a stream of w32023 uploads from nft.storage
+ * @param {object} options - options
+ * @param {string} [options.api] - optional API endpoint override
+ * @param {string} options.token
+ * @returns {AsyncIterable<W32023Upload> & { length: Promise<number> }} uploads
+ */
+export function getUploads ({
   api = API,
   token
 }) {
   if (!token) {
-    console.log('! run `nft token` to set an API token to use')
-    process.exit(-1)
+    throw new Error('! run `nft token` to set an API token to use')
   }
   const endpoint = new URL(api)
   if (api !== API) {
     // note if we're using something other than prod.
-    console.log(`using ${endpoint.hostname}`)
+    console.info(`using ${endpoint.hostname}`)
   }
-  return new NftStorage({ token, endpoint })
+  const classicNftStorage = new NFTStorage({ token, endpoint })
+
+  const uploads = (async function* () {
+    for await (const u of classicNftStorage.list()) {
+      if (u) {
+        yield new W32023Upload(u)
+      }
+    }
+  }())
+
+  return Object.assign(uploads, { length: classicNftStorage.count() })
 }
 
 /**
@@ -22,7 +40,7 @@ export function getClient ({
  * @property {string} token
  */
 
-class NftStorage {
+class NFTStorage {
   constructor ({ token, endpoint }) {
     this.token = token
     this.endpoint = endpoint
@@ -39,6 +57,16 @@ class NftStorage {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     }
+  }
+
+  count() {
+    const res = fetch(this.endpoint.toString(), {
+      method: 'GET',
+      headers: {
+        ...NFTStorage.headers(this.token)
+      },
+    })
+    return res.then(r => parseInt(r.headers.get('count'), 10)).then(c => isNaN(c) ? undefined : c)
   }
 
   /**
@@ -67,7 +95,7 @@ class NftStorage {
       return fetch(url.toString(), {
         method: 'GET',
         headers: {
-          ...NftStorage.headers(token)
+          ...NFTStorage.headers(token)
         },
       })
     }

@@ -1,13 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
-import { exampleUpload1 } from './w32023.js'
+import { exampleUpload1 } from '../src/w32023.js'
 import * as ed25519 from '@ucanto/principal/ed25519'
 import { ReadableStream } from 'node:stream/web'
 import { pipeline } from 'node:stream/promises'
 import { createCarFinder, locate } from './test-utils.js'
 import { createServer } from 'node:http'
 import { delegate } from '@ucanto/core'
-import { encodeDelegationAsCid } from './w3-env.js'
+import { encodeDelegationAsCid } from '../src/w3-env.js'
 import { createMockW3up, spawnMigration } from "./test-utils.js"
 import { text } from 'node:stream/consumers'
 
