@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/web3-storage/migrate-to-w3up/compare/migrate-to-w3up-v1.0.3...migrate-to-w3up-v1.1.0) (2024-07-01)
+
+
+### Features
+
+* add nft.storage source ([ffe5c03](https://github.com/web3-storage/migrate-to-w3up/commit/ffe5c03b2bc7b67a711c49173b4b8833a76fd868))
+
 ## [1.0.3](https://github.com/web3-storage/migrate-to-w3up/compare/migrate-to-w3up-v1.0.2...migrate-to-w3up-v1.0.3) (2024-03-14)
 
 
