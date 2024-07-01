@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { W32023Upload, W32023UploadSummary, W32023UploadsFromNdjson } from "./w32023.js";
+import { W32023Upload, W32023UploadSummary, W32023UploadsFromNdjson } from "../src/w32023.js";
 import { fileURLToPath } from 'node:url'
 import fs, { createReadStream, createWriteStream } from 'node:fs'
 import { Readable } from 'node:stream'
@@ -10,19 +10,20 @@ import { DID } from "@ucanto/validator"
 import { StoreConf } from '@web3-storage/access/stores/store-conf'
 import { select } from '@inquirer/prompts';
 import confirm from '@inquirer/confirm';
-import { Web3Storage } from 'web3.storage'
 import promptForPassword from '@inquirer/password';
-import { carPartToStoreAddNb, migrate } from "./w32023-to-w3up.js";
-import { UploadMigrationFailure, UploadMigrationSuccess, UploadPartMigrationFailure, receiptToJson } from "./w3up-migration.js";
+import { carPartToStoreAddNb, migrate } from "../src/w32023-to-w3up.js";
+import { UploadMigrationFailure, UploadMigrationSuccess, UploadPartMigrationFailure, receiptToJson } from "../src/w3up-migration.js";
 import { Store } from "@web3-storage/capabilities";
 import { connect } from '@ucanto/client'
 import { CAR, HTTP } from '@ucanto/transport'
 import { StoreMemory } from "@web3-storage/access/stores/store-memory";
 import * as ed25519Principal from '@ucanto/principal/ed25519'
-import { parseW3Proof } from "./w3-env.js";
+import { parseW3Proof } from "../src/w3-env.js";
 import inquirer from 'inquirer';
 import readNDJSONStream from 'ndjson-readablestream'
-import { stringToCarCid } from "./utils.js";
+import { stringToCarCid } from "../src/utils.js";
+import { getUploads as getNftStorageClassicUploads } from '../src/classic-nft.storage.js'
+import { getUploads as getOldWeb3StorageUploads } from '../src/old-web3.storage.js'
 
 // if this file is being executed directly, run main() function
 const isMain = (url, argv = process.argv) => fileURLToPath(url) === fs.realpathSync(argv[1])
@@ -338,33 +339,62 @@ async function promptForSpace(w3upUrl) {
  * @returns {Promise<AsyncIterable<W32023Upload> & { length: Promise<number> }>} uploads
  */
 async function getUploadsFromPrompts() {
-  const confirmation = await confirm({
+  const oldW3sConfirmation = await confirm({
     message: 'no uploads were piped in. Do you want to migrate uploads from old.web3.storage?',
   })
-  if (!confirmation) throw new Error('unable to find a source of uploads to migrate')
+  let getTokenFn = getOldWeb3StorageToken
+  let getUploadsFn = getOldWeb3StorageUploads
+  if (!oldW3sConfirmation) {
+    const classicNftConfirmation = await confirm({
+      message: 'no uploads were piped in. Do you want to migrate uploads from classic-app.nft.storage?',
+    })
+    if (!classicNftConfirmation) {
+      throw new Error('unable to find a source of uploads to migrate')
+    }
+    getTokenFn = getClassicNftStorageToken
+    getUploadsFn = getNftStorageClassicUploads
+  }
+  const token = await getTokenFn()
+  try {
+    return getUploadsFn({token})
+  } catch (e) {
+    console.log(e)
+    process.exit(-1)
+  }
+}
+
+/**
+ * get a stream of w32023 uploads via
+ * interactive prompts using inquirer
+ * + old web3.storage client library
+ * @returns {Promise<string>} uploads
+ */
+async function getOldWeb3StorageToken() {
   const envToken = process.env.WEB3_TOKEN
-  let token;
   if (envToken && await confirm({ message: 'found WEB3_TOKEN in env. Use that?' })) {
-    token = envToken
+    return envToken
   } else {
-    token = await promptForPassword({
+    return await promptForPassword({
       message: 'enter API token for old.web3.storage',
     })
   }
-  const oldW3 = new Web3Storage({ token })
-  const uploads = (async function* () {
-    for await (const u of oldW3.list()) {
-      if (u) {
-        yield new W32023Upload(u)
-      }
-    }
-  }())
-  // get count
-  const userUploadsResponse = fetch(`https://api.web3.storage/user/uploads`, {
-    headers: { authorization: `Bearer ${token}` },
-  })
-  const count = userUploadsResponse.then(r => parseInt(r.headers.get('count'), 10)).then(c => isNaN(c) ? undefined : c)
-  return Object.assign(uploads, { length: count })
+}
+
+/**
+ * get a stream of nft.storage uploads via
+ * interactive prompts using inquirer
+ *
+ * @returns {Promise<string>} uploads
+ */
+async function getClassicNftStorageToken() {
+  const envToken = process.env.NFT_STORAGE_TOKEN
+  if (envToken && await confirm({ message: 'found NFT_STORAGE_TOKEN in env. Use that?' })) {
+    return envToken
+  } else {
+    return await promptForPassword({
+      message: 'enter API token for classic-app.nft.storage',
+    })
+  }
 }
 
 /**

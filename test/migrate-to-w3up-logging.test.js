@@ -6,10 +6,10 @@ import {
   locate,
   createUploadsStream,
   setupSpaceMigrationScenario,
-} from "../test-utils.js"
+} from "./test-utils.js"
 import { createServer } from 'node:http'
 import * as ed25519 from '@ucanto/principal/ed25519'
-import { encodeDelegationAsCid } from '../w3-env.js'
+import { encodeDelegationAsCid } from '../src/w3-env.js'
 import { pipeline } from 'node:stream/promises'
 import { join } from 'node:path'
 import { text } from 'node:stream/consumers'
@@ -19,7 +19,7 @@ import * as fs from "fs/promises"
 import { tmpdir } from 'node:os'
 import readNDJSONStream from 'ndjson-readablestream'
 import { Readable } from 'node:stream'
-import { readUploadsFromUploadMigrationFailuresNdjson } from '../w3up-migration.js'
+import { readUploadsFromUploadMigrationFailuresNdjson } from '../src/w3up-migration.js'
 
 /** make a temporary file path that can be used for test migration logfiles  */
 async function getTmpLogFilePath() {

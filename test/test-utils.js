@@ -6,7 +6,7 @@ import { Store, Upload } from '@web3-storage/capabilities'
 import * as consumers from 'stream/consumers'
 import * as CAR from '@ucanto/transport/car'
 import * as ed25519 from '@ucanto/principal/ed25519'
-import { exampleUpload1 } from './w32023.js'
+import { exampleUpload1 } from '../src/w32023.js'
 import { ReadableStream } from 'node:stream/web'
 import { delegate } from '@ucanto/core'
 
@@ -100,7 +100,7 @@ export function locate(server) {
 }
 
 
-export const migrateToW3upPath = fileURLToPath(new URL('./migrate-to-w3up.js', import.meta.url))
+export const migrateToW3upPath = fileURLToPath(new URL('../bin/migrate-to-w3up.js', import.meta.url))
 
 /**
  * create a RequestListener that can be a mock up.web3.storage
